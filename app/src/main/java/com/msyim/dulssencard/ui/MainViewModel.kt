@@ -1,15 +1,12 @@
 package com.msyim.dulssencard.ui
 
-import android.Manifest
 import android.app.Application
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.msyim.dulssencard.data.DulSsenRepository
 import com.msyim.dulssencard.data.Settings
+import com.msyim.dulssencard.data.crypto.BackupCrypto
 import com.msyim.dulssencard.data.model.Card
 import com.msyim.dulssencard.data.model.ChangeType
 import com.msyim.dulssencard.data.model.PendingReason
@@ -18,12 +15,13 @@ import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Cycle
+import com.msyim.dulssencard.domain.InitialAmountPolicy
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.ingest.Ingestor
-import com.msyim.dulssencard.ingest.RawMessage
 import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ingest.LedgerScreenParser
 import com.msyim.dulssencard.ingest.OcrText
+import com.msyim.dulssencard.ingest.RawMessage
 import com.msyim.dulssencard.ingest.SourceGate
 import com.msyim.dulssencard.ocr.ImageOcrHelper
 import kotlinx.coroutines.Dispatchers
@@ -33,19 +31,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 enum class Screen { ONBOARD, HOME, INBOX, DETAIL, CARDS, EDIT, SETTINGS, SOURCES }
 
 enum class InboxTab { PENDING, ALL, EXCLUDED }
 
+/** 비밀번호를 물어야 하는 지점. 백업은 사용자가 기억하는 비밀번호로만 열린다. */
+enum class BackupPrompt { EXPORT, IMPORT }
+
 data class CardForm(
     val nickname: String = "",
+    /** 숫자만 담는다. 천 단위 쉼표는 화면에서만 붙인다(커서가 끝으로 튀지 않게). */
     val target: String = "",
     val keywords: String = "",
     val exclude: String = "",
@@ -66,6 +70,8 @@ data class UiState(
     val screen: Screen = Screen.ONBOARD,
     val backTo: Screen = Screen.INBOX,
     val inboxTab: InboxTab = InboxTab.PENDING,
+    /** 결과함을 이 카드의 거래로만 좁힌다. null 이면 전체다. */
+    val cardFilterId: String? = null,
     val sortByName: Boolean = false,
     val selectedTxnId: String? = null,
     val editingCardId: String? = null,
@@ -74,16 +80,23 @@ data class UiState(
     val sourceApps: List<SourceApp> = emptyList(),
     val limitAmount: Long = Settings.DEFAULT_LIMIT_AMOUNT,
     val limitCycleStartDay: Int = Settings.DEFAULT_LIMIT_CYCLE_START_DAY,
-    val limitInput: String = Money.grouped(Settings.DEFAULT_LIMIT_AMOUNT),
+    /** 숫자만 담는다. [CardForm.target] 과 같은 이유다. */
+    val limitInput: String = Settings.DEFAULT_LIMIT_AMOUNT.toString(),
     val autoCollectEnabled: Boolean = false,
     val hasNotificationAccess: Boolean = false,
     val defaultSmsPackage: String? = null,
     val form: CardForm = CardForm(),
     val toast: Toast? = null,
-    val needsSmsPermission: Boolean = false,
-    val exportFileUri: String? = null,
-    val needsImagePermission: Boolean = false,
     val showImagePicker: Boolean = false,
+    /** 비밀번호 입력 다이얼로그. */
+    val backupPrompt: BackupPrompt? = null,
+    /** 사용자가 고른 백업 파일. 비밀번호를 받은 뒤에 읽는다. */
+    val pendingImportUri: String? = null,
+    val showBackupPicker: Boolean = false,
+    /** 내보내기가 끝난 파일. 공유 시트로 넘긴 뒤 비운다. */
+    val shareBackupPath: String? = null,
+    /** 금액을 손으로 고치는 중인 거래. */
+    val editingAmountTxnId: String? = null,
 ) {
     val pendingCount: Int get() = txns.count { it.status == TxStatus.PENDING }
 
@@ -140,6 +153,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var undoSnapshot: DulSsenRepository.Snapshot? = null
     private var toastJob: Job? = null
 
+    /**
+     * 백업 JSON 파서.
+     * `ignoreUnknownKeys` 를 켜는 이유: 나중 버전이 필드를 더한 백업을 지금 앱으로 열어도
+     * 통째로 실패하지 않게 하려는 것이다. 형식 버전 검사는 [DulSsenRepository.importData] 가 한다.
+     */
+    private val backupJson = Json { ignoreUnknownKeys = true }
+
     init {
         viewModelScope.launch {
             combine(
@@ -153,23 +173,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val limit = settings[Settings.LIMIT_AMOUNT]?.toLongOrNull()
                     ?: Settings.DEFAULT_LIMIT_AMOUNT
                 val onboarded = settings[Settings.ONBOARDING_DONE] == "true"
-                _state.value = _state.value.copy(
-                    loading = false,
-                    cards = cards,
-                    txns = txns,
-                    sourceApps = sources,
-                    limitAmount = limit,
-                    limitCycleStartDay = settings[Settings.LIMIT_CYCLE_START_DAY]?.toIntOrNull()
-                        ?: Settings.DEFAULT_LIMIT_CYCLE_START_DAY,
-                    limitInput = Money.grouped(limit),
-                    autoCollectEnabled = settings[Settings.AUTO_COLLECT_ENABLED] != "false",
-                    sortByName = settings[Settings.HOME_SORT_BY_NAME] == "true",
-                    screen = if (_state.value.loading) {
-                        if (onboarded) Screen.HOME else Screen.ONBOARD
-                    } else {
-                        _state.value.screen
-                    },
-                )
+                _state.update { current ->
+                    current.copy(
+                        loading = false,
+                        cards = cards,
+                        txns = txns,
+                        sourceApps = sources,
+                        limitAmount = limit,
+                        limitCycleStartDay = settings[Settings.LIMIT_CYCLE_START_DAY]?.toIntOrNull()
+                            ?: Settings.DEFAULT_LIMIT_CYCLE_START_DAY,
+                        limitInput = limit.toString(),
+                        autoCollectEnabled = settings[Settings.AUTO_COLLECT_ENABLED] != "false",
+                        sortByName = settings[Settings.HOME_SORT_BY_NAME] == "true",
+                        screen = if (current.loading) {
+                            if (onboarded) Screen.HOME else Screen.ONBOARD
+                        } else {
+                            current.screen
+                        },
+                    )
+                }
             }
         }
         viewModelScope.launch { seedSourceApps() }
@@ -207,7 +229,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     report.append(if (app.enabled) "[켬] " else "[끔] ")
                         .append(app.label).append(" / ").appendLine(app.packageName)
                 }
-                java.io.File(context.filesDir, "sources_dump.txt").writeText(report.toString())
+                File(context.filesDir, "sources_dump.txt").writeText(report.toString())
             }
         }
     }
@@ -218,10 +240,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refreshPermissions() {
         val context = getApplication<Application>()
-        _state.value = _state.value.copy(
-            hasNotificationAccess = SourceGate.hasNotificationAccess(context),
-            defaultSmsPackage = SourceGate.defaultSmsPackage(context),
-        )
+        _state.update {
+            it.copy(
+                hasNotificationAccess = SourceGate.hasNotificationAccess(context),
+                defaultSmsPackage = SourceGate.defaultSmsPackage(context),
+            )
+        }
     }
 
     // ------------------------------------------------------------- 화면 이동
@@ -229,26 +253,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 화면을 옮길 때 스낵바를 즉시 닫는다(README: 화면 전환 시 스낵바 즉시 닫기). */
     fun go(screen: Screen) {
         toastJob?.cancel()
-        _state.value = _state.value.copy(screen = screen, toast = null)
+        _state.update { it.copy(screen = screen, toast = null) }
     }
 
     fun openInbox(tab: InboxTab) {
         toastJob?.cancel()
-        _state.value = _state.value.copy(screen = Screen.INBOX, inboxTab = tab, toast = null)
+        _state.update {
+            it.copy(screen = Screen.INBOX, inboxTab = tab, cardFilterId = null, toast = null)
+        }
+    }
+
+    /**
+     * 홈에서 카드를 눌렀을 때. 그 카드의 거래만 보여 준다.
+     *
+     * 예전에는 결과함 '전체' 탭으로만 보냈다. 카드가 여러 장이면 어느 줄이 그 카드 것인지
+     * 사용자가 눈으로 골라내야 했고, 홈의 숫자가 왜 그 값인지 확인할 방법이 없었다.
+     */
+    fun openCardTransactions(card: Card) {
+        toastJob?.cancel()
+        _state.update {
+            it.copy(
+                screen = Screen.INBOX,
+                inboxTab = InboxTab.ALL,
+                cardFilterId = card.id,
+                toast = null,
+            )
+        }
+    }
+
+    fun clearCardFilter() {
+        _state.update { it.copy(cardFilterId = null) }
     }
 
     fun selectInboxTab(tab: InboxTab) {
-        _state.value = _state.value.copy(inboxTab = tab)
+        _state.update { it.copy(inboxTab = tab) }
     }
 
     fun openTxn(id: String, from: Screen) {
         toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.DETAIL,
-            selectedTxnId = id,
-            backTo = from,
-            toast = null,
-        )
+        _state.update {
+            it.copy(
+                screen = Screen.DETAIL,
+                selectedTxnId = id,
+                backTo = from,
+                editingAmountTxnId = null,
+                toast = null,
+            )
+        }
     }
 
     fun back() {
@@ -257,7 +308,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleSort() {
         val next = !_state.value.sortByName
-        _state.value = _state.value.copy(sortByName = next)
+        _state.update { it.copy(sortByName = next) }
         viewModelScope.launch {
             repository.putSetting(Settings.HOME_SORT_BY_NAME, next.toString())
         }
@@ -269,7 +320,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             repository.putSetting(Settings.ONBOARDING_DONE, "true")
             repository.putSetting(Settings.AUTO_COLLECT_ENABLED, enableCollection.toString())
-            _state.value = _state.value.copy(screen = Screen.HOME)
+            _state.update { it.copy(screen = Screen.HOME) }
             say(
                 if (enableCollection) {
                     "자동 집계를 켰습니다"
@@ -285,46 +336,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newCard() {
         toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.EDIT,
-            editingCardId = null,
-            backTo = Screen.CARDS,
-            form = CardForm(),
-            toast = null,
-        )
+        _state.update {
+            it.copy(
+                screen = Screen.EDIT,
+                editingCardId = null,
+                backTo = Screen.CARDS,
+                form = CardForm(),
+                toast = null,
+            )
+        }
     }
 
     fun editCard(card: Card) {
         toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.EDIT,
-            editingCardId = card.id,
-            backTo = Screen.CARDS,
-            toast = null,
-            form = CardForm(
-                nickname = card.nickname,
-                target = Money.grouped(card.trackingTarget),
-                keywords = card.matchKeywords.joinToString(", "),
-                exclude = card.excludeKeywords.joinToString(", "),
-                startDay = card.cycleStartDay,
-                defaultTarget = card.defaultCountsTowardTarget,
-                defaultLimit = card.defaultCountsTowardPurchaseLimit,
-                // 지난 주기에 넣은 초기값은 이미 합계에서 빠졌다. 그걸 그대로 보여 주면
-                // 사용자가 아직 유효한 값으로 오해하므로, 이번 주기 것만 채운다.
-                initialAmount = if (
-                    card.initialAmount != 0L &&
-                    Cycle.windowFor(card.cycleStartDay).contains(card.initialAmountAt)
-                ) {
-                    Money.grouped(card.initialAmount)
-                } else {
-                    ""
-                },
-            ),
-        )
+        _state.update {
+            it.copy(
+                screen = Screen.EDIT,
+                editingCardId = card.id,
+                backTo = Screen.CARDS,
+                toast = null,
+                form = CardForm(
+                    nickname = card.nickname,
+                    target = card.trackingTarget.toString(),
+                    keywords = card.matchKeywords.joinToString(", "),
+                    exclude = card.excludeKeywords.joinToString(", "),
+                    startDay = card.cycleStartDay,
+                    defaultTarget = card.defaultCountsTowardTarget,
+                    defaultLimit = card.defaultCountsTowardPurchaseLimit,
+                    // 지난 주기에 넣은 초기값은 이미 합계에서 빠졌다. 그걸 그대로 보여 주면
+                    // 사용자가 아직 유효한 값으로 오해하므로, 이번 주기 것만 채운다.
+                    // (비워 둔 채로 저장해도 지난 주기 기록은 지워지지 않는다 —
+                    //  InitialAmountPolicy 규칙 4.)
+                    initialAmount = if (
+                        card.initialAmount != 0L &&
+                        Cycle.windowFor(card.cycleStartDay).contains(card.initialAmountAt)
+                    ) {
+                        card.initialAmount.toString()
+                    } else {
+                        ""
+                    },
+                ),
+            )
+        }
     }
 
     fun updateForm(transform: (CardForm) -> CardForm) {
-        _state.value = _state.value.copy(form = transform(_state.value.form))
+        _state.update { it.copy(form = transform(it.form)) }
     }
 
     fun saveCard() {
@@ -335,41 +392,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             say("별명·목표·인식 키워드는 필수입니다", undoable = false)
             return
         }
-        // 초기 사용액은 선택 항목이다. 비워 두면 지금까지처럼 통지만 센다.
-        val initial = if (form.initialAmount.isBlank()) 0L else Money.parseAmount(form.initialAmount)
-        if (initial == null || initial < 0L) {
+        // 초기 사용액은 선택 항목이다. **비어 있는 것(null)과 0 을 넣은 것을 구분한다** —
+        // 비어 있으면 지난 주기 기록을 건드리지 않고, 0 이면 초기값을 쓰지 않겠다는 뜻이다.
+        val initialInput = if (form.initialAmount.isBlank()) null else Money.parseAmount(form.initialAmount)
+        if (form.initialAmount.isNotBlank() && initialInput == null) {
             say("초기 사용액은 숫자로 입력해 주세요", undoable = false)
             return
         }
+
         val editingId = _state.value.editingCardId
+        val startDay = Cycle.normalizeStartDay(form.startDay)
         viewModelScope.launch {
             val existing = editingId?.let { repository.card(it) }
-            // 기준 시각은 **저장하는 지금**이다. 이 시각 이전 거래는 이미 초기값에 들어 있다.
-            // 값을 바꾸지 않았으면 기존 기준 시각을 유지해, 저장만 눌렀다고 해서
-            // 그 사이 들어온 거래가 합계에서 사라지지 않게 한다.
-            val initialChanged = initial != (existing?.initialAmount ?: 0L)
-            val stamp = when {
-                initial == 0L -> 0L
-                initialChanged || existing?.initialAmountAt == 0L -> System.currentTimeMillis()
-                else -> existing?.initialAmountAt ?: System.currentTimeMillis()
-            }
+            val initial = InitialAmountPolicy.resolve(
+                existingAmount = existing?.initialAmount ?: 0L,
+                existingAt = existing?.initialAmountAt ?: 0L,
+                input = initialInput,
+                cycleStartDay = startDay,
+                now = System.currentTimeMillis(),
+            )
             repository.upsertCard(
                 Card(
                     id = editingId ?: UUID.randomUUID().toString(),
                     nickname = form.nickname.trim(),
                     trackingTarget = target,
-                    cycleStartDay = Cycle.normalizeStartDay(form.startDay),
+                    cycleStartDay = startDay,
                     matchKeywords = keywords,
                     excludeKeywords = splitKeywords(form.exclude),
                     defaultCountsTowardTarget = form.defaultTarget,
                     defaultCountsTowardPurchaseLimit = form.defaultLimit,
-                    initialAmount = initial,
-                    initialAmountAt = stamp,
+                    initialAmount = initial.amount,
+                    initialAmountAt = initial.at,
                     active = existing?.active ?: true,
                     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 ),
             )
-            _state.value = _state.value.copy(screen = Screen.CARDS)
+            _state.update { it.copy(screen = Screen.CARDS) }
             say(if (editingId == null) "카드를 저장했습니다" else "변경을 저장했습니다", undoable = false)
         }
     }
@@ -378,7 +436,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
             repository.deleteCard(card)
-            _state.value = _state.value.copy(screen = Screen.CARDS)
+            _state.update { it.copy(screen = Screen.CARDS) }
             say("${card.nickname} 카드를 지웠습니다 — 거래는 미분류로 남았습니다", undoable = true)
         }
     }
@@ -435,6 +493,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         message = "제외를 복원했습니다",
     ) { it.copy(status = TxStatus.AUTO, pendingReason = null) }
 
+    // ------------------------------------------------------------- 금액 수동 보정
+
+    fun startAmountEdit(txn: Txn) {
+        _state.update { it.copy(editingAmountTxnId = txn.id) }
+    }
+
+    fun cancelAmountEdit() {
+        _state.update { it.copy(editingAmountTxnId = null) }
+    }
+
+    /**
+     * 금액을 손으로 고친다.
+     *
+     * PRD 는 "모든 집계값을 변경·제외·되돌릴 수 있다"고 했는데 금액만 손댈 방법이 없었다.
+     * OCR 이 `12,820원` 을 `12,820l` 로 읽거나 자릿수를 하나 흘리는 일이 실제로 있어서,
+     * 거래를 통째로 버리는 것 말고 고쳐 쓰는 길이 필요하다.
+     */
+    fun correctAmount(txn: Txn, raw: String) {
+        val amount = Money.parseAmount(raw)
+        if (amount == null || amount <= 0L) {
+            say("금액은 1원 이상 숫자로 입력해 주세요", undoable = false)
+            return
+        }
+        if (amount == txn.amount) {
+            _state.update { it.copy(editingAmountTxnId = null) }
+            return
+        }
+        _state.update { it.copy(editingAmountTxnId = null) }
+        mutate(
+            txn = txn,
+            changeType = ChangeType.AMOUNT_MANUAL,
+            message = "금액을 ${Money.won(amount)}(으)로 고쳤습니다",
+        ) { it.copy(amount = amount) }
+    }
+
     private fun mutate(
         txn: Txn,
         changeType: ChangeType,
@@ -452,11 +545,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------- 설정
 
     fun updateLimitInput(raw: String) {
-        _state.value = _state.value.copy(limitInput = Money.reformatInput(raw))
+        _state.update { it.copy(limitInput = Money.onlyDigits(raw)) }
     }
 
     fun commitLimit() {
-        val amount = Money.parseAmount(_state.value.limitInput) ?: return
+        val amount = Money.parseAmount(_state.value.limitInput)
+        if (amount == null || amount <= 0L) {
+            // 예전에는 조용히 아무것도 안 했다. 사용자는 저장된 줄 알고 화면을 떠난다.
+            say("한도는 1원 이상 숫자로 입력해 주세요", undoable = false)
+            return
+        }
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
             repository.putSetting(Settings.LIMIT_AMOUNT, amount.toString())
@@ -475,7 +573,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 자동 집계 스위치.
-     * 끄면 SMS 리시버 컴포넌트까지 꺼서 브로드캐스트 자체가 도달하지 않게 한다.
+     * 끄면 [com.msyim.dulssencard.notification.PaymentNotificationListener] 가 알림 내용을
+     * 아예 읽지 않는다(설정을 먼저 보고 나간다). 서비스 자체는 계속 바인딩돼 있는데,
+     * 알림 접근은 시스템 설정에서만 끌 수 있어 앱이 해제할 수 없기 때문이다.
      */
     fun setAutoCollectEnabled(enabled: Boolean) {
         viewModelScope.launch {
@@ -503,35 +603,114 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repository.wipeAll()
             // 삭제는 알림 소스 목록도 비운다. 곧바로 다시 채우지 않으면 수집이 통째로 멈춘다.
             seedSourceApps()
+            // 무엇을 언제 지웠는지 기록으로 남긴다. 거래에 붙지 않는 전역 기록이라
+            // transactionId 는 null 이다.
+            repository.logGlobalChange(ChangeType.WIPE, "로컬 데이터 전체 삭제")
             say("로컬 데이터를 모두 삭제했습니다", undoable = true)
         }
     }
 
-    fun exportEncrypted() {
+    // ------------------------------------------------------------- 암호화 백업
+
+    fun requestExport() {
+        _state.update { it.copy(backupPrompt = BackupPrompt.EXPORT) }
+    }
+
+    fun requestImport() {
+        _state.update { it.copy(showBackupPicker = true) }
+    }
+
+    fun clearBackupPickerRequest() {
+        _state.update { it.copy(showBackupPicker = false) }
+    }
+
+    fun onBackupFilePicked(uri: Uri) {
+        _state.update {
+            it.copy(pendingImportUri = uri.toString(), backupPrompt = BackupPrompt.IMPORT)
+        }
+    }
+
+    fun dismissBackupPrompt() {
+        _state.update { it.copy(backupPrompt = null, pendingImportUri = null) }
+    }
+
+    fun clearShareRequest() {
+        _state.update { it.copy(shareBackupPath = null) }
+    }
+
+    /**
+     * 전체 데이터를 **비밀번호로 암호화해서** 파일 하나로 내보낸다.
+     *
+     * 예전에는 이 함수가 같은 이름("암호화 내보내기")으로 **평문 JSON** 을 외부 저장소에 썼다.
+     * SQLCipher 와 Keystore 로 쌓아 올린 방어가 그 한 줄로 통째로 우회됐고,
+     * 화면에는 암호화한다고 적혀 있었다.
+     */
+    fun exportEncrypted(password: String) {
+        if (password.length < BackupCrypto.MIN_PASSWORD_LENGTH) {
+            say("비밀번호는 ${BackupCrypto.MIN_PASSWORD_LENGTH}자 이상이어야 합니다", undoable = false)
+            return
+        }
+        _state.update { it.copy(backupPrompt = null) }
         viewModelScope.launch {
+            val context = getApplication<Application>()
             try {
-                val data = withContext(Dispatchers.IO) {
-                    repository.exportData()
+                val path = withContext(Dispatchers.IO) {
+                    val json = backupJson.encodeToString(
+                        DulSsenRepository.BackupData.serializer(),
+                        repository.exportData(),
+                    )
+                    val sealed = BackupCrypto.seal(
+                        json.toByteArray(Charsets.UTF_8),
+                        password.toCharArray(),
+                    )
+                    val dir = File(context.filesDir, EXPORT_DIR).apply { mkdirs() }
+                    // 예전 백업은 지운다. 암호화돼 있긴 해도 기기에 사본을 쌓아 둘 이유가 없다.
+                    dir.listFiles()?.forEach { it.delete() }
+                    val stamp = FILE_STAMP.format(Instant.now())
+                    File(dir, "dulssencard-backup-$stamp.dsc").apply { writeBytes(sealed) }.absolutePath
                 }
-                val json = Json.encodeToString(data)
-
-                // 내보내기 디렉토리에 파일 저장
-                val context = getApplication<Application>()
-                val exportsDir = File(context.getExternalFilesDir(null), "exports")
-                exportsDir.mkdirs()
-
-                val timestamp = System.currentTimeMillis()
-                val filename = "dulssencard_backup_$timestamp.json"
-                val file = File(exportsDir, filename)
-
-                withContext(Dispatchers.IO) {
-                    file.writeText(json)
-                }
-
-                _state.value = _state.value.copy(exportFileUri = file.absolutePath)
-                say("백업 파일을 저장했습니다: $filename", undoable = false)
+                _state.update { it.copy(shareBackupPath = path) }
+                say("백업을 암호화해서 만들었습니다 — 저장할 곳을 고르세요", undoable = false)
             } catch (e: Exception) {
-                say("내보내기 실패: ${e.message}", undoable = false)
+                say("내보내기에 실패했습니다", undoable = false)
+            }
+        }
+    }
+
+    /** 고른 백업 파일을 풀어 기존 데이터에 합친다. */
+    fun importBackup(password: String) {
+        val uriString = _state.value.pendingImportUri
+        if (uriString == null) {
+            say("불러올 파일을 먼저 고르세요", undoable = false)
+            return
+        }
+        _state.update { it.copy(backupPrompt = null, pendingImportUri = null) }
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            undoSnapshot = repository.snapshot()
+            try {
+                val counts = withContext(Dispatchers.IO) {
+                    val bytes = context.contentResolver.openInputStream(Uri.parse(uriString))
+                        ?.use { it.readBytes() }
+                        ?: error("파일을 열 수 없습니다")
+                    val json = String(
+                        BackupCrypto.open(bytes, password.toCharArray()),
+                        Charsets.UTF_8,
+                    )
+                    repository.importData(
+                        backupJson.decodeFromString(DulSsenRepository.BackupData.serializer(), json),
+                    )
+                }
+                say(
+                    "백업을 불러왔습니다 — 카드 ${counts.cards}장 · 거래 ${counts.txns}건",
+                    undoable = true,
+                )
+            } catch (e: BackupCrypto.WrongPasswordException) {
+                say("비밀번호가 다르거나 파일이 손상되었습니다", undoable = false)
+            } catch (e: IllegalArgumentException) {
+                say(e.message ?: "지원하지 않는 백업 형식입니다", undoable = false)
+            } catch (e: Exception) {
+                say("백업 파일을 읽지 못했습니다", undoable = false)
             }
         }
     }
@@ -541,7 +720,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 시스템 사진 선택기가 사용자가 고른 한 장만 넘겨준다.
      */
     fun requestImageImport() {
-        _state.value = _state.value.copy(showImagePicker = true)
+        _state.update { it.copy(showImagePicker = true) }
     }
 
     /**
@@ -638,7 +817,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun clearImagePickerRequest() {
-        _state.value = _state.value.copy(showImagePicker = false)
+        _state.update { it.copy(showImagePicker = false) }
     }
 
     // ------------------------------------------------------------- 스낵바 · 되돌리기
@@ -646,11 +825,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun say(message: String, undoable: Boolean) {
         toastJob?.cancel()
         if (!undoable) undoSnapshot = null
-        _state.value = _state.value.copy(toast = Toast(message, undoable))
+        _state.update { it.copy(toast = Toast(message, undoable)) }
         toastJob = viewModelScope.launch {
             delay(TOAST_DURATION_MS)
             undoSnapshot = null
-            _state.value = _state.value.copy(toast = null)
+            _state.update { it.copy(toast = null) }
         }
     }
 
@@ -665,11 +844,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissToast() {
         toastJob?.cancel()
-        _state.value = _state.value.copy(toast = null)
+        _state.update { it.copy(toast = null) }
     }
 
     private companion object {
         /** README: 스낵바는 4.2초 후 자동 소멸하고, 되돌리기도 그때 만료된다. */
         const val TOAST_DURATION_MS = 4_200L
+
+        /** 내부 저장소 안의 백업 폴더. `@xml/file_paths` 가 여는 경로와 같아야 한다. */
+        const val EXPORT_DIR = "exports"
+
+        val FILE_STAMP: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmm").withZone(Cycle.ZONE)
     }
 }

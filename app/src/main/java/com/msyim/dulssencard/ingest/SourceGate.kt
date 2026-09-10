@@ -43,11 +43,4 @@ object SourceGate {
     fun notificationAccessSettingsIntent(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-    /** 앱 상세 설정 화면. */
-    fun appSettingsIntent(context: Context): Intent =
-        Intent(
-            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-            android.net.Uri.fromParts("package", context.packageName, null),
-        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 }

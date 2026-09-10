@@ -1,7 +1,6 @@
 package com.msyim.dulssencard.notification
 
 import android.app.Notification
-import android.content.pm.PackageManager
 import android.provider.Telephony
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -40,6 +39,15 @@ class PaymentNotificationListener : NotificationListenerService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * 패키지별로 '알림을 띄웠다'를 마지막으로 기록한 시각.
+     *
+     * 이게 없으면 **기기의 모든 알림 하나하나마다** 암호화 DB 에 쓰기가 일어난다.
+     * 카톡 대화 알림까지 포함하면 하루에 수백~수천 번이다. 이 기록은 설정 화면의
+     * 목록을 채우려는 것뿐이라 분 단위 정확도가 필요 없다.
+     */
+    private val lastNotedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName ?: return
         if (packageName == applicationContext.packageName) return
@@ -55,7 +63,9 @@ class PaymentNotificationListener : NotificationListenerService() {
 
         scope.launch {
             // 목록에 이름만 남긴다. 내용은 아직 건드리지 않았다.
-            repository.noteSourceAppSeen(packageName, label)
+            if (shouldNote(packageName)) {
+                repository.noteSourceAppSeen(packageName, label)
+            }
 
             if (repository.getSetting(Settings.AUTO_COLLECT_ENABLED) == "false") return@launch
             if (!repository.isSourceAppEnabled(packageName)) return@launch
@@ -122,10 +132,22 @@ class PaymentNotificationListener : NotificationListenerService() {
         IssuerRegistry.byPackage(packageName)?.displayName ?: packageName
     }
 
-    override fun onNotificationRemoved(sbn: StatusBarNotification) = Unit
-}
+    /**
+     * 이 패키지를 지금 기록할까. 처음 보는 앱은 언제나 기록한다 —
+     * 그래야 허용 목록에 없는 카드사 앱도 설정 화면에 나타나 사용자가 켤 수 있다.
+     */
+    private fun shouldNote(packageName: String): Boolean {
+        val now = System.currentTimeMillis()
+        val last = lastNotedAt[packageName]
+        if (last != null && now - last in 0 until SOURCE_NOTE_INTERVAL_MILLIS) return false
+        lastNotedAt[packageName] = now
+        return true
+    }
 
-/** 패키지 라벨 조회 실패를 조용히 넘기기 위한 도우미. */
-internal fun PackageManager.labelOrNull(packageName: String): String? = runCatching {
-    getApplicationLabel(getApplicationInfo(packageName, 0)).toString()
-}.getOrNull()
+    override fun onNotificationRemoved(sbn: StatusBarNotification) = Unit
+
+    private companion object {
+        /** 같은 앱을 다시 기록하기까지 기다리는 시간. */
+        const val SOURCE_NOTE_INTERVAL_MILLIS = 60L * 60 * 1000
+    }
+}

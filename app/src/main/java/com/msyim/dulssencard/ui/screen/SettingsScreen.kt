@@ -36,11 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.msyim.dulssencard.data.model.SourceApp
 import com.msyim.dulssencard.domain.Cycle
+import com.msyim.dulssencard.ui.component.AmountVisualTransformation
 import com.msyim.dulssencard.ui.component.DaySquareChip
 import com.msyim.dulssencard.ui.component.DsToggle
 import com.msyim.dulssencard.ui.component.Footnote
 import com.msyim.dulssencard.ui.component.Hairline
-import com.msyim.dulssencard.ui.component.OutlineBadge
 import com.msyim.dulssencard.ui.component.SectionLabel
 import com.msyim.dulssencard.ui.theme.Ds
 import com.msyim.dulssencard.ui.theme.DsType
@@ -62,6 +62,7 @@ fun SettingsScreen(
     onOpenNotificationAccess: () -> Unit,
     onOpenSourceApps: () -> Unit,
     onExportEncrypted: () -> Unit,
+    onImportBackup: () -> Unit,
     onImportFromImage: () -> Unit,
     onWipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -150,9 +151,18 @@ fun SettingsScreen(
         item {
             SettingRow(
                 title = "암호화 내보내기",
-                subtitle = "비밀번호를 잃어버리면 복구할 수 없습니다.",
-                badge = "P1",
+                subtitle = "비밀번호로 잠근 파일 하나로 내보냅니다. " +
+                    "이 앱은 네트워크를 쓰지 않아 어디에도 사본이 없습니다 — " +
+                    "비밀번호를 잃어버리면 복구할 수 없습니다.",
                 onClick = onExportEncrypted,
+            )
+        }
+
+        item {
+            SettingRow(
+                title = "백업 파일 불러오기",
+                subtitle = "내보낸 파일을 골라 비밀번호를 넣으면 기존 데이터에 합칩니다.",
+                onClick = onImportBackup,
             )
         }
 
@@ -197,7 +207,8 @@ fun SettingsScreen(
             title = { Text("로컬 데이터를 모두 지울까요?", style = DsType.listPrimary.copy(fontSize = 16.sp)) },
             text = {
                 Text(
-                    "카드 설정, 거래, 보정 기록이 이 기기에서 지워집니다. " +
+                    "카드 설정, 거래, 보정 기록, 알림 소스 설정이 이 기기에서 지워집니다. " +
+                        "지운 자리는 파일에서도 정리합니다. " +
                         "삭제 직후 4.2초 안에는 되돌릴 수 있습니다.",
                     style = DsType.listSecondary,
                 )
@@ -246,6 +257,7 @@ private fun LimitBox(
                     singleLine = true,
                     cursorBrush = SolidColor(Ds.ink),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    visualTransformation = AmountVisualTransformation,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -265,7 +277,7 @@ private fun LimitBox(
             Text("한도 저장", style = DsType.listPrimary.copy(fontSize = 13.sp, color = Ds.paper))
         }
 
-        // 일자 칩 28개를 펼쳐 두면 4줄을 먹어서, 아래 '암호화 내보내기'·'최근 14일 내역
+        // 일자 칩 28개를 펼쳐 두면 4줄을 먹어서, 아래 '암호화 내보내기'·'백업 파일
         // 불러오기'·'로컬 데이터 전체 삭제'가 첫 화면 밖으로 밀려 없는 것처럼 보인다.
         // 평소엔 현재 값만 한 줄로 보여 주고 누를 때만 펼친다.
         var dayPickerOpen by rememberSaveable { mutableStateOf(false) }
@@ -318,7 +330,6 @@ private fun SettingRow(
     subtitle: String,
     modifier: Modifier = Modifier,
     titleColor: androidx.compose.ui.graphics.Color = Ds.ink,
-    badge: String? = null,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
@@ -331,13 +342,7 @@ private fun SettingRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, style = DsType.listPrimary.copy(fontSize = 15.sp, color = titleColor))
-                    if (badge != null) {
-                        Spacer(Modifier.width(8.dp))
-                        OutlineBadge(badge)
-                    }
-                }
+                Text(title, style = DsType.listPrimary.copy(fontSize = 15.sp, color = titleColor))
                 Spacer(Modifier.height(4.dp))
                 Text(subtitle, style = DsType.listSecondary)
             }

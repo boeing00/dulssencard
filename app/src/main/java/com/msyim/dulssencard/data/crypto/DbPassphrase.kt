@@ -63,23 +63,6 @@ object DbPassphrase {
         }
     }
 
-    /**
-     * 봉인된 암호와 Keystore 키를 함께 버린다.
-     * '로컬 데이터 전체 삭제'에서 DB 파일을 지운 뒤 호출하면, 남은 파일 조각도 다시 열리지 않는다.
-     */
-    fun destroy(context: Context) {
-        synchronized(this) {
-            cached?.fill(0)
-            cached = null
-            context.applicationContext
-                .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .edit().remove(PREF_SEALED).commit()
-            runCatching {
-                KeyStore.getInstance(KEYSTORE).apply { load(null) }.deleteEntry(KEY_ALIAS)
-            }
-        }
-    }
-
     private fun seal(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, keystoreKey())

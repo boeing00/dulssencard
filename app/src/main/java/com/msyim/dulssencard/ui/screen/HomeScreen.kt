@@ -66,7 +66,14 @@ fun HomeScreen(
         item { LimitCard(limit, onOpenLimitSettings) }
         item {
             Footnote(
-                "사용자 설정과 결제 알림 분류에 따른 추적값이며 카드사 공식 실적과 다를 수 있습니다.",
+                buildString {
+                    append("사용자 설정과 결제 알림 분류에 따른 추적값이며 카드사 공식 실적과 다를 수 있습니다.")
+                    // 카드에 직접 입력한 사용액은 한도 합계에 들어가지 않는다. 밝히지 않으면
+                    // 아래 카드 숫자와 위 한도 숫자가 어긋나 보이고 어느 쪽이 맞는지 알 수 없다.
+                    if (rows.any { it.initialApplied != 0L }) {
+                        append(" 카드에 직접 입력한 사용액은 이 한도 합계에 포함되지 않습니다.")
+                    }
+                },
                 Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 9.dp),
             )
         }
@@ -267,7 +274,9 @@ private fun ForeignSpendRow(items: List<Aggregator.ForeignSpend>) {
         items.forEach { item ->
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                 Text(
-                    "${item.currency} ${"%,.2f".format(item.total)}",
+                    // 로케일을 고정한다. 기본 로케일에 맡기면 기기 설정에 따라
+                    // `1.234,56` 처럼 소수점과 자릿수 구분자가 뒤바뀐다.
+                    "${item.currency} ${Money.foreign(item.total)}",
                     style = DsType.monoSmall.copy(fontSize = 13.sp, color = Ds.ink),
                     modifier = Modifier.weight(1f),
                 )

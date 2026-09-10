@@ -59,15 +59,22 @@ fun InboxScreen(
     txns: List<Txn>,
     cards: List<Card>,
     tab: InboxTab,
+    cardFilterId: String?,
     onSelectTab: (InboxTab) -> Unit,
+    onClearCardFilter: () -> Unit,
     onOpenTxn: (Txn) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val pending = txns.filter { it.status == TxStatus.PENDING }
-    val excluded = txns.filter { it.status == TxStatus.EXCLUDED }
+    // 홈에서 카드를 눌러 들어오면 그 카드의 거래만 본다. 카드가 여러 장일 때
+    // 홈의 숫자가 어디서 나왔는지 확인할 수 있는 유일한 길이다.
+    val filterCard = cards.firstOrNull { it.id == cardFilterId }
+    val scoped = if (filterCard == null) txns else txns.filter { it.cardId == filterCard.id }
+
+    val pending = scoped.filter { it.status == TxStatus.PENDING }
+    val excluded = scoped.filter { it.status == TxStatus.EXCLUDED }
     val visible = when (tab) {
         InboxTab.PENDING -> pending
-        InboxTab.ALL -> txns
+        InboxTab.ALL -> scoped
         InboxTab.EXCLUDED -> excluded
     }
     val cardNames = cards.associate { it.id to it.nickname }
@@ -110,9 +117,13 @@ fun InboxScreen(
                     selected = tab == InboxTab.PENDING,
                     onClick = { onSelectTab(InboxTab.PENDING) },
                 )
-                DsChip("전체 ${txns.size}", tab == InboxTab.ALL, onClick = { onSelectTab(InboxTab.ALL) })
+                DsChip("전체 ${scoped.size}", tab == InboxTab.ALL, onClick = { onSelectTab(InboxTab.ALL) })
                 DsChip("제외됨", tab == InboxTab.EXCLUDED, onClick = { onSelectTab(InboxTab.EXCLUDED) })
             }
+        }
+
+        if (filterCard != null) {
+            item { CardFilterBanner(filterCard.nickname, onClearCardFilter) }
         }
 
         if (visible.isEmpty()) {
@@ -197,18 +208,54 @@ private fun TxnRow(txn: Txn, cardName: String?, onClick: () -> Unit) {
     }
 }
 
-/** 취소는 앞에 `−` 를 붙여 차감임을 드러낸다. */
-private fun amountLabel(txn: Txn): String = when {
-    txn.amount <= 0L && txn.currency != "KRW" && txn.currency.isNotBlank() ->
-        "${txn.currency} 확인 필요"
-    txn.direction == TxDirection.CANCEL -> "−${Money.won(txn.amount)}"
-    else -> Money.won(txn.amount)
+/**
+ * 취소는 앞에 `−` 를 붙여 차감임을 드러낸다.
+ *
+ * 해외 승인은 원화 금액이 없는 게 정상이라 그냥 `Money.won` 을 쓰면 **`0원`** 으로 보인다.
+ * 상세 화면이 실제로 그랬다. 외화 금액이 있으면 그 값을 통화와 함께 적는다 —
+ * 환율을 알 방법이 없어 원화로는 환산하지 않는다.
+ */
+internal fun amountLabel(txn: Txn): String {
+    val foreign = txn.foreignAmount
+    val isForeign = txn.amount <= 0L && txn.currency.isNotBlank() && txn.currency != "KRW"
+    val sign = if (txn.direction == TxDirection.CANCEL) "−" else ""
+    return when {
+        isForeign && foreign != null -> "$sign${txn.currency} ${Money.foreign(foreign)}"
+        isForeign -> "${txn.currency} 확인 필요"
+        else -> sign + Money.won(txn.amount)
+    }
 }
 
 private fun amountColor(txn: Txn): Color = when {
     txn.direction == TxDirection.CANCEL -> Ds.green
     txn.status != TxStatus.AUTO -> Ds.text3
     else -> Ds.ink
+}
+
+/** 어떤 카드로 좁혀 보고 있는지 밝히고, 한 번에 풀 수 있게 한다. */
+@Composable
+private fun CardFilterBanner(nickname: String, onClear: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = Ds.screenPadding)
+            .padding(bottom = 12.dp)
+            .clip(RoundedCornerShape(Ds.radiusBanner))
+            .background(Ds.paper2)
+            .padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "$nickname 거래만 보는 중",
+            style = DsType.listSecondary.copy(color = Ds.textBody),
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "전체 보기",
+            style = DsType.listSecondary.copy(color = Ds.accent),
+            modifier = Modifier.clickable(onClick = onClear),
+        )
+    }
 }
 
 @Composable

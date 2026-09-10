@@ -51,10 +51,29 @@ object Money {
             .trimStart('0')
             .take(MAX_INPUT_DIGITS)
 
-    /** 입력 중 천 단위 쉼표 자동 삽입. 빈 값이면 빈 문자열을 돌려준다. */
-    fun reformatInput(input: String): String {
-        val value = parseAmount(input) ?: return ""
-        return grouped(value)
+    /**
+     * 숫자 문자열에 천 단위 쉼표만 끼워 넣는다.
+     *
+     * [grouped] 와 달리 Long 으로 바꾸지 않는다. 그래서 자릿수가 아무리 길어도, 앞자리에
+     * 0 이 있어도 **숫자 개수와 표시 글자 수의 관계가 어긋나지 않는다.**
+     * 입력칸의 커서 위치 계산([groupedOffset])이 이 성질에 기댄다.
+     */
+    fun group(digits: String): String =
+        digits.reversed().chunked(3).joinToString(",").reversed()
+
+    /**
+     * 숫자만 세어 구한 커서 위치를, 쉼표가 끼워진 표시 문자열에서의 위치로 옮긴다.
+     *
+     * 입력칸이 값을 매 글자마다 다시 포맷해 넣으면 커서가 끝으로 튀어 중간 수정이 불가능해진다.
+     * 그래서 상태에는 숫자만 담고 쉼표는 표시할 때만 끼우는데, 그러려면 두 좌표계를
+     * 오갈 방법이 필요하다.
+     */
+    fun groupedOffset(digitCount: Int, offset: Int): Int {
+        if (digitCount <= 0) return 0
+        val rest = digitCount - offset.coerceIn(0, digitCount)
+        val commasAfterCursor = if (rest <= 0) 0 else (rest - 1) / 3
+        val formattedLength = digitCount + (digitCount - 1) / 3
+        return (formattedLength - rest - commasAfterCursor).coerceIn(0, formattedLength)
     }
 }
 
