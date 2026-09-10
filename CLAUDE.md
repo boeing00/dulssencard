@@ -35,7 +35,8 @@
 - 패키지: `com.msyim.dulssencard` (디버그는 `.debug` 접미사)
 - 버전: `0.1.0` / versionCode 1 · minSdk 26 · compileSdk·targetSdk 37
 - APK: debug 67.8MB / release 50.9MB (대부분 ML Kit 한국어 OCR 모델)
-- 테스트: **125개 전부 통과** (2026-09-08 기준)
+- 테스트: 단위 **195개**(기기 없이) + 계측 **4개**(마이그레이션, 기기 필요)
+  · 2026-09-10 시점. **이 숫자는 마지막으로 실제 실행한 결과가 아니다** — 아래 §10 참고.
 - git: `73a8b1e P0 구현` 이 첫 커밋. 브랜치 `master`
 
 ---
@@ -68,6 +69,11 @@ SharedPreferences 에 봉인된 형태로만 둔다. 디버깅한다고 OCR 원�
 > 실제로 그런 진단 코드를 넣었다가 2026-09-08 에 전부 제거했다.
 > 지금 남아 있는 `sources_dump.txt` 는 **앱 이름·패키지명뿐**이고 DEBUG 빌드 한정이다.
 
+> 2026-09-10 에 같은 규칙을 한 번 더 깼던 것을 찾아 고쳤다. `"암호화 내보내기"` 라는
+> 이름과 화면 문구를 달고 **거래·가맹점·금액이 든 JSON 을 평문으로 외부 저장소에**
+> 쓰고 있었다. 지금은 `BackupCrypto` 가 사용자 비밀번호로 봉인하고 파일은 내부 저장소에만
+> 둔다. **디버깅이든 편의든, 이 파일에 평문을 쓰는 코드를 다시 넣지 말 것.**
+
 디버깅이 필요하면 단위 테스트에 실측 문자열을 넣어라 — `DeviceOcrTest` 가 그 방식이다.
 
 ### ③ 이미지에서 온 거래는 자동 반영하지 않는다
@@ -88,7 +94,8 @@ cd /c/Users/moons/AndroidStudioProjects/dulssencard
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 ADB="C:/Users/moons/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
-./gradlew :app:testDebugUnitTest        # 125개, 기기 없이 돈다
+./gradlew :app:testDebugUnitTest        # 195개, 기기 없이 돈다
+./gradlew :app:connectedDebugAndroidTest  # 마이그레이션 검증 4개, 기기 필요
 ./gradlew :app:assembleDebug
 "$ADB" -s R3CX50262WD install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -163,7 +170,7 @@ adb shell cmd notification allow_listener com.msyim.dulssencard.debug/com.msyim.
 
 ---
 
-## 4. 초기 사용액(`initialAmount`) — **확정 사양, 구현 대기** (2026-09-08)
+## 4. 초기 사용액(`initialAmount`) — **구현 완료** (2026-09-10)
 
 ### 왜 이렇게 정했나
 
@@ -177,7 +184,7 @@ PRD §P0 도 이에 맞춰 고쳤다(`initialAmount` 명명은 PRD 를 따른다
 
 ### 데이터 모델
 
-`Card` 에 두 필드를 더한다 (Room `version = 3` → `4`, 마이그레이션 필요):
+`Card` 에 두 필드가 있다 (Room `version = 4`, `MIGRATION_3_4`):
 
 ```kotlin
 /** 주기 시작일부터 [initialAmountAt] 까지 쓴 금액. 사용자가 카드앱에서 보고 직접 입력한다. */
@@ -223,15 +230,28 @@ private fun initialFor(card: Card, cycle: Cycle.Window): Long =
 - **언제든 다시 입력해 덮어쓸 수 있게 한다.** 통지를 놓쳐 총계가 어긋났을 때
   카드앱 숫자를 다시 넣는 것이 가장 빠르고 확실한 복구 경로다. 이게 이 설계의 진짜 장점이다.
 
-### 테스트로 먼저 잠글 것
+### 어디에 있나
 
-```kotlin
-@Test fun `초기값과 이후 통지를 더해 합계를 낸다`()
-@Test fun `주기가 넘어가면 초기값을 세지 않는다`()      // ← 가장 중요
-@Test fun `기준 시각 이전 거래는 초기값에 더하지 않는다`()
-@Test fun `기준 이후 취소는 차감한다`()
-@Test fun `초기값은 외화 합계에 섞이지 않는다`()
-```
+| 무엇 | 파일 |
+|---|---|
+| 읽을 때 주기를 확인해 0으로 떨어뜨리는 규칙 | `domain/Aggregator.initialAmountIn` |
+| **저장할 때 기준 시각을 정하는 규칙** | `domain/InitialAmountPolicy` |
+| 읽는 쪽 회귀 테스트 | `InitialAmountTest` |
+| 저장하는 쪽 회귀 테스트 | `InitialAmountPolicyTest` |
+
+### 저장할 때 기준 시각 — 여기서 한 번 크게 틀렸다
+
+처음 구현은 기준 시각을 **"금액이 지난번과 달라졌는가"**로만 갱신했다. 그래서
+10월에 카드앱을 보고 9월과 **같은 금액**을 옮겨 적으면 기준 시각이 9월에 머물렀고,
+`Aggregator` 는 "이번 주기 값이 아니다"라며 **0으로 읽었다.** 사용자는 30만원을
+입력했는데 홈은 0원부터 시작하고, 저장 성공 스낵바까지 떠서 원인을 알 방법이 없었다.
+
+지금은 **"기존 기준 시각이 이번 주기 안에 있는가"**로 판단한다. 밖이면 금액이 같아도
+지금으로 다시 찍는다. 규칙 넷은 `InitialAmountPolicy` KDoc 에 적어 두었고 테스트로 잠겼다.
+
+같은 함수에서 하나 더 고쳤다 — 입력칸이 비어 있고 기존 기록이 **지난 주기**면 지우지
+않는다. 화면이 지난 주기 값을 비워서 보여 주므로(이번 주기에 유효하지 않으니까),
+별명만 고치고 저장한 것을 "초기값을 지우겠다"로 읽으면 입력 기록이 날아갔다.
 
 ### OCR 코드는 **지금 지우지 않는다**
 
@@ -264,7 +284,7 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 
 ## 6. 테스트 — 고치기 전에 케이스를 먼저 넣는다
 
-125개 전부 기기 없이 돈다. **새 문구·새 화면을 만나면 실측 문자열을 테스트에 먼저
+단위 테스트는 전부 기기 없이 돈다. **새 문구·새 화면을 만나면 실측 문자열을 테스트에 먼저
 박아 넣고 파서를 고친다.** 지어낸 샘플로는 실제 실패 양상이 재현되지 않는다.
 
 | 파일 | 무엇을 잠그나 |
@@ -275,7 +295,12 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 | `LedgerScreenParserTest` · `OcrLayoutTest` · `OcrImportTest` | 목록 화면·좌표 복원·이미지 반입 |
 | `BankAndForeignTest` | 환전·송금 제외, 외화 분리, 이미지 자동반영 금지 |
 | `IngestorTest` | 문자·푸시·알림톡으로 같은 결제가 와도 **한 번만** 집계 |
-| `CycleAndAggregatorTest` | 주기(Asia/Seoul 고정, 시작일 1~28) · 집계 |
+| `CycleAndAggregatorTest` | 주기(Asia/Seoul 고정, 시작일 1~28) · 집계 · 주기 마감 스냅샷 |
+| `InitialAmountTest` · `InitialAmountPolicyTest` | 초기 사용액을 읽는 쪽 / 저장하는 쪽 (§4) |
+| `MoneyTest` | 자릿수 구분과 입력칸 커서 위치 계산 |
+| `BackupCryptoTest` | 백업 파일 암호화 왕복·위변조 탐지 |
+| `CardMatchingTest` | 카드사 표기 차이(`우리WON카드`)와 뒷 4자리로 카드 가르기 |
+| **`AppDatabaseMigrationTest`** | **마이그레이션 1→2→3→4. 기기 필요** (`connectedDebugAndroidTest`) |
 
 ---
 
@@ -283,11 +308,13 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 
 ### 순서대로
 
-1. [x] `git init` + 첫 커밋 (`73a8b1e P0 구현`) — 완료
-2. [ ] **`initialAmount` 구현** (§4). 테스트 → 모델·마이그레이션 → `Aggregator` → 화면 순서.
-       **주기 넘어갈 때 0이 되는 것**을 테스트로 먼저 잠글 것.
-3. [ ] 홈의 주 경로를 `initialAmount` 로 바꾸고 캡처 불러오기는 설정으로 물린다.
-4. [ ] 실기기에서 한 주기 써 보고, OCR 제거 여부를 그때 판단한다.
+1. [x] `git init` + 첫 커밋 — 완료
+2. [x] **`initialAmount` 구현** (§4) — 완료. 저장할 때 기준 시각을 정하는 규칙에서
+       한 번 크게 틀렸다가 고쳤다. §4 를 읽고 손댈 것.
+3. [ ] **빌드와 테스트를 한 번 돌릴 것** — §10. 이게 1번이다.
+4. [ ] 홈의 주 경로를 `initialAmount` 로 바꾸고 캡처 불러오기는 설정으로 물린다.
+       (지금은 둘 다 설정에 있다. 홈에서 카드를 누르면 그 카드의 거래 목록으로 간다.)
+5. [ ] 실기기에서 한 주기 써 보고, OCR 제거 여부를 그때 판단한다.
 
 ### 아직 확인 못 한 것
 
@@ -310,7 +337,12 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 
 ### P1 (PRD 에 있으나 미착수)
 
-암호화 내보내기/가져오기, Drive 백업, 카드사별 파서 템플릿.
+Drive 백업, 카드사별 파서 템플릿, 주기 마감 스냅샷을 **보여 주는** 화면.
+
+암호화 내보내기/가져오기는 구현했다(`data/crypto/BackupCrypto`). 비밀번호에서
+PBKDF2-HMAC-SHA256 으로 키를 뽑아 AES-256-GCM 으로 봉인하고, 파일은 내부 저장소에만
+두고 공유 시트로 넘긴다. DB 암호(Keystore 봉인)를 쓰지 않는 이유는 그 키가 기기 밖으로
+나갈 수 없어서다 — 그걸로 잠그면 기기를 바꾸는 순간 백업이 벽돌이 된다.
 (PRD 의 '최근 14일 재스캔'은 `READ_SMS` 가 필요해 폐기했다 — 그 자리를 §4 개시 잔액이 대신한다.)
 
 ---
@@ -342,3 +374,35 @@ PRD 와 이 문서가 어긋나면 **PRD 가 무엇을·이 문서가 어떻게*
 이 프로젝트 버그의 대부분이다.
 
 항공 계산 로직·릴리스 서명·API 키 관련은 다른 프로젝트 포함해 **위임 금지**다.
+
+---
+
+## 10. 아직 실행으로 확인하지 못한 것 (2026-09-10)
+
+2026-09-10 에 버그 수정을 한 묶음 넣었는데, **그 작업 환경에서는 빌드를 돌릴 수 없었다.**
+Android Gradle Plugin 을 받을 수 없는 네트워크였다(`dl.google.com` 차단).
+그래서 아래 셋은 코드를 읽어서만 확인했고 컴파일·실행으로는 확인하지 못했다.
+
+**다음 세션에서 제일 먼저 할 일:**
+
+```bash
+./gradlew :app:testDebugUnitTest          # 단위 195개
+./gradlew :app:assembleRelease            # 릴리스 lint 는 fatal 이다
+"$ADB" -s R3CX50262WD ... && ./gradlew :app:connectedDebugAndroidTest   # 마이그레이션 4개
+```
+
+특히 눈여겨볼 곳:
+
+1. **직렬화 컴파일러 플러그인 버전.** `libs.versions.toml` 의 `kotlinSerializationPlugin`
+   이 2.1.0 인데 내장 Kotlin 은 2.3.21 이다. 원래 어긋나 있던 것을 그대로 두었다 —
+   맞추는 게 옳지만 돌려 보기 전에는 §2 의 `newDsl` 함정을 되풀이할지 알 수 없다.
+   빌드가 통과하면 `version.ref = "kotlin"` 으로 바꾸고 다시 돌려 볼 것.
+2. **`MigrationTestHelper` 생성자.** Room 2.8 에서 시그니처가 여러 벌이다.
+   `AppDatabaseMigrationTest` 가 쓰는 4-인자 형태가 안 맞으면 그 파일만 고치면 된다.
+3. **권한이 새어 들어왔는지.** `FileProvider` 를 매니페스트에 넣었다(권한이 아니라
+   provider 라 §1① 은 그대로지만) — 아래를 돌려 출력이 비어 있는지 반드시 확인할 것.
+
+```bash
+./gradlew :app:processReleaseManifest && \
+  grep 'uses-permission' app/build/intermediates/merged_manifests/release/*/AndroidManifest.xml
+```
