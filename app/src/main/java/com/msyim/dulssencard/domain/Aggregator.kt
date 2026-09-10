@@ -67,8 +67,8 @@ object Aggregator {
      */
     private fun initialAmountIn(card: Card, window: Cycle.Window): Long =
         if (card.initialAmount != 0L && 
-            card.initialAmountAt > window.start && 
-            card.initialAmountAt <= window.endInclusive) {
+            card.initialAmountAt > window.startMillis && 
+            card.initialAmountAt < window.endMillis) {
             card.initialAmount
         } else {
             0L
