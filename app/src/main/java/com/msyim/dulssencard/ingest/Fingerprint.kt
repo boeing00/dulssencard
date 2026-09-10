@@ -68,11 +68,47 @@ object Fingerprint {
         val left = normalizeMerchant(a)
         val right = normalizeMerchant(b)
         if (left.isEmpty() || right.isEmpty()) return false
-        return !left.startsWith(right) && !right.startsWith(left)
+        
+        // 정규화 후 완전히 같으면 충돌하지 않음
+        if (left == right) return false
+        
+        // 한쪽이 다른 쪽의 접두어면 충돌하지 않음 (예: "스타벅스" vs "스타벅스강남점")
+        if (left.startsWith(right) || right.startsWith(left)) return false
+        
+        // Levenshtein 거리 기반 유사도 검사 - 편집거리가 짧으면 동일 가맹점으로 간주
+        val maxLen = maxOf(left.length, right.length)
+        val distance = levenshteinDistance(left, right)
+        val similarity = 1.0 - (distance.toDouble() / maxLen)
+        
+        // 유사도 85% 이상이면 같은 가맹점으로 판단 (충돌하지 않음)
+        return similarity < 0.85
     }
 
     private fun normalizeMerchant(merchant: String?): String =
-        merchant.orEmpty().lowercase().filter { it.isLetterOrDigit() }
+        merchant.orEmpty()
+            .lowercase()
+            .replace(Regex("""\s+"""), "")  // 모든 공백 제거
+            .filter { it.isLetterOrDigit() }
+    
+    private fun levenshteinDistance(a: String, b: String): Int {
+        val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+        
+        for (i in 0..a.length) dp[i][0] = i
+        for (j in 0..b.length) dp[0][j] = j
+        
+        for (i in 1..a.length) {
+            for (j in 1..b.length) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,      // deletion
+                    dp[i][j - 1] + 1,      // insertion
+                    dp[i - 1][j - 1] + cost // substitution
+                )
+            }
+        }
+        
+        return dp[a.length][b.length]
+    }
 
     private fun sha256(value: String): String =
         MessageDigest.getInstance("SHA-256")

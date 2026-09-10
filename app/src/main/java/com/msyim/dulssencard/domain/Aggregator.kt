@@ -66,7 +66,9 @@ object Aggregator {
      * 기록으로 남겨 두기 위해서다.
      */
     private fun initialAmountIn(card: Card, window: Cycle.Window): Long =
-        if (card.initialAmount != 0L && window.contains(card.initialAmountAt)) {
+        if (card.initialAmount != 0L && 
+            card.initialAmountAt > window.start && 
+            card.initialAmountAt <= window.endInclusive) {
             card.initialAmount
         } else {
             0L
