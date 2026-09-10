@@ -15,11 +15,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.msyim.dulssencard.data.model.Adjustment
@@ -31,6 +40,7 @@ import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.IssuerRegistry
+import com.msyim.dulssencard.ui.component.AmountVisualTransformation
 import com.msyim.dulssencard.ui.component.DestructiveButton
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.DsToggle
@@ -58,6 +68,10 @@ fun DetailScreen(
     onConfirm: () -> Unit,
     onExclude: () -> Unit,
     onRestore: () -> Unit,
+    editingAmount: Boolean,
+    onStartAmountEdit: () -> Unit,
+    onCancelAmountEdit: () -> Unit,
+    onAmountCorrected: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val meta = statusMeta(txn)
@@ -83,17 +97,37 @@ fun DetailScreen(
             ) {
                 Text(meta.label.uppercase(), style = DsType.badge.copy(color = meta.color))
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    if (txn.direction == TxDirection.CANCEL) {
-                        "−${Money.won(txn.amount)}"
-                    } else {
-                        Money.won(txn.amount)
-                    },
-                    style = DsType.detailAmount.copy(
-                        color = if (txn.direction == TxDirection.CANCEL) Ds.green else Ds.ink,
-                    ),
-                    maxLines = 1,
-                )
+                if (editingAmount) {
+                    AmountEditor(
+                        initial = txn.amount.toString(),
+                        onCancel = onCancelAmountEdit,
+                        onSave = onAmountCorrected,
+                    )
+                } else {
+                    Text(
+                        amountLabel(txn),
+                        style = DsType.detailAmount.copy(
+                            color = if (txn.direction == TxDirection.CANCEL) Ds.green else Ds.ink,
+                        ),
+                        maxLines = 1,
+                    )
+                    // 해외 승인은 원화 금액이 없다. 환율을 알 방법이 없어 환산하지 않는다.
+                    val foreign = txn.foreignAmount
+                    if (foreign != null && txn.currency.isNotBlank() && txn.currency != "KRW") {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "${txn.currency} ${Money.foreign(foreign)} · " +
+                                "환율을 알 수 없어 원화 합계에는 넣지 않습니다",
+                            style = DsType.footnote,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "금액 고치기",
+                        style = DsType.link.copy(textDecoration = TextDecoration.Underline),
+                        modifier = Modifier.clickable(onClick = onStartAmountEdit),
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Text(txn.merchant ?: "미확인 가맹점", style = DsType.cardNickname)
                 Spacer(Modifier.height(4.dp))
@@ -153,6 +187,56 @@ fun DetailScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * 금액 수동 보정.
+ *
+ * PRD 는 "모든 집계값을 변경·제외·되돌릴 수 있다"고 했는데 금액만 손댈 방법이 없었다.
+ * OCR 이 `12,820원` 을 `12,820l` 로 읽거나 자릿수를 하나 흘리는 일이 실제로 있어서,
+ * 거래를 통째로 버리는 것 말고 고쳐 쓰는 길이 필요하다. 고친 내역은 변경 기록에 남는다.
+ */
+@Composable
+private fun AmountEditor(initial: String, onCancel: () -> Unit, onSave: (String) -> Unit) {
+    var value by remember(initial) { mutableStateOf(initial) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = { value = Money.onlyDigits(it) },
+                    textStyle = DsType.detailAmount,
+                    singleLine = true,
+                    cursorBrush = SolidColor(Ds.ink),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    visualTransformation = AmountVisualTransformation,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Text("원", style = DsType.listPrimary.copy(fontSize = 15.sp))
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(Ds.hairline).background(Ds.ink))
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(
+                "저장",
+                style = DsType.link.copy(
+                    color = Ds.accent,
+                    textDecoration = TextDecoration.Underline,
+                ),
+                modifier = Modifier.clickable { onSave(value) },
+            )
+            Text(
+                "취소",
+                style = DsType.link.copy(color = Ds.textSubtle),
+                modifier = Modifier.clickable(onClick = onCancel),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text("고친 금액은 변경 기록에 남습니다.", style = DsType.footnote)
     }
 }
 

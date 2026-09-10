@@ -148,9 +148,6 @@ interface SourceAppDao {
     @Query("SELECT * FROM source_apps ORDER BY enabled DESC, label ASC")
     suspend fun all(): List<SourceApp>
 
-    @Query("SELECT packageName FROM source_apps WHERE enabled = 1")
-    suspend fun enabledPackages(): List<String>
-
     @Upsert
     suspend fun upsert(app: SourceApp)
 

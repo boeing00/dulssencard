@@ -22,11 +22,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.msyim.dulssencard.data.model.Card
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.ui.CardForm
+import com.msyim.dulssencard.ui.component.AmountVisualTransformation
 import com.msyim.dulssencard.ui.component.DaySquareChip
 import com.msyim.dulssencard.ui.component.DestructiveButton
 import com.msyim.dulssencard.ui.component.DsToggle
@@ -170,8 +172,10 @@ fun CardEditScreen(
                     textStyle = DsType.inputAmount,
                     keyboardType = KeyboardType.Number,
                     suffix = "원",
-                    // 입력 중 천 단위 쉼표 자동 삽입.
-                    onValueChange = { v -> onChange { it.copy(target = Money.reformatInput(v)) } },
+                    // 상태에는 숫자만 담고 쉼표는 표시할 때만 끼운다.
+                    // 값을 매번 다시 포맷해 넣으면 커서가 끝으로 튀어 중간 수정이 안 된다.
+                    visualTransformation = AmountVisualTransformation,
+                    onValueChange = { v -> onChange { it.copy(target = Money.onlyDigits(v)) } },
                 )
 
                 UnderlinedField(
@@ -179,7 +183,9 @@ fun CardEditScreen(
                     value = form.keywords,
                     placeholder = "신한, 신한카드",
                     textStyle = DsType.inputText.copy(fontSize = 15.sp),
-                    helper = "쉼표로 구분. 결제 문자·앱 알림에서 이 키워드를 찾습니다.",
+                    helper = "쉼표로 구분. 결제 문자·앱 알림에서 이 키워드를 찾습니다. " +
+                        "같은 카드사 카드를 여러 장 등록했다면 카드 뒷 4자리도 키워드로 " +
+                        "넣어 두세요 — 그래야 어느 카드인지 갈립니다.",
                     onValueChange = { v -> onChange { it.copy(keywords = v) } },
                 )
 
@@ -217,11 +223,13 @@ fun CardEditScreen(
                     keyboardType = KeyboardType.Number,
                     suffix = "원",
                     underlineColor = Ds.line,
+                    visualTransformation = AmountVisualTransformation,
                     helper = "이번 달 ${form.startDay}일부터 오늘까지 쓴 금액을 카드사 앱에서 " +
                         "확인해 입력하세요. 앞으로 도착하는 결제 알림은 여기에 자동으로 더해집니다. " +
-                        "비워 두면 지금부터 쌓이는 금액만 셉니다.",
+                        "비워 두면 지금부터 쌓이는 금액만 셉니다. 합계가 어긋나면 언제든 " +
+                        "카드사 앱 숫자를 다시 넣어 맞출 수 있습니다.",
                     onValueChange = { v ->
-                        onChange { it.copy(initialAmount = Money.reformatInput(v)) }
+                        onChange { it.copy(initialAmount = Money.onlyDigits(v)) }
                     },
                 )
             }
@@ -308,6 +316,7 @@ private fun UnderlinedField(
     suffix: String? = null,
     helper: String? = null,
     underlineColor: androidx.compose.ui.graphics.Color = Ds.ink,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
     Column(modifier.fillMaxWidth()) {
         Text(label.uppercase(), style = DsType.fieldLabel)
@@ -324,6 +333,7 @@ private fun UnderlinedField(
                     singleLine = true,
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(Ds.ink),
                     keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                    visualTransformation = visualTransformation,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }

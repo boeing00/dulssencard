@@ -99,13 +99,5 @@ abstract class AppDatabase : RoomDatabase() {
                 // 스키마를 바꿀 때는 반드시 Migration 을 추가한다.
                 .build()
         }
-
-        /** '로컬 데이터 전체 삭제' 후 다음 열기에서 새 파일을 만들도록 인스턴스를 버린다. */
-        fun closeAndForget() {
-            synchronized(this) {
-                instance?.close()
-                instance = null
-            }
-        }
     }
 }

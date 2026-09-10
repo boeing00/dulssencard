@@ -1,7 +1,6 @@
 package com.msyim.dulssencard.data
 
 import android.content.Context
-import com.msyim.dulssencard.data.crypto.DbPassphrase
 import com.msyim.dulssencard.data.db.AppDatabase
 import com.msyim.dulssencard.data.model.Adjustment
 import com.msyim.dulssencard.data.model.Card
@@ -12,8 +11,10 @@ import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.ingest.Ingestor
 import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ingest.RawMessage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -197,34 +198,86 @@ class DulSsenRepository private constructor(private val context: Context) {
         db.adjustmentDao().observeForTxn(txnId)
 
     /**
+     * 거래에 붙지 않는 전역 변경 기록(예: 로컬 데이터 전체 삭제).
+     *
+     * PRD §6.3 은 "변경 시 원값·변경값·시간·사유를 기록한다"고 했는데, 가장 크게 바꾸는
+     * 동작인 전체 삭제만 기록이 남지 않고 있었다. [Adjustment.transactionId] 가 null 인
+     * 행이 이것이다.
+     */
+    suspend fun logGlobalChange(changeType: ChangeType, reason: String) {
+        db.adjustmentDao().insert(
+            Adjustment(
+                id = UUID.randomUUID().toString(),
+                transactionId = null,
+                changeType = changeType,
+                beforeState = "-",
+                afterState = "-",
+                reason = reason,
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /**
      * 거래 상태 요약. 변경 기록에 남는 값이라 **금액과 상태만** 담고 가맹점·원문은 넣지 않는다.
      * PRD §10: 진단 로그에 거래 데이터를 기록하지 않는다.
      */
     private fun describe(txn: Txn): String = buildString {
         append("card=").append(txn.cardId ?: "-")
         append(" status=").append(txn.status.name)
+        append(" amount=").append(txn.amount)
         append(" target=").append(if (txn.countsTowardTarget) "1" else "0")
         append(" limit=").append(if (txn.countsTowardPurchaseLimit) "1" else "0")
     }
 
     // ---------------------------------------------------------------- 되돌리기
 
-    /** 되돌리기용 스냅샷. 마지막 1건만 되돌릴 수 있으므로 통째로 떠 둔다. */
-    data class Snapshot(val cards: List<Card>, val txns: List<Txn>, val settings: Map<String, String>)
+    /**
+     * 되돌리기용 스냅샷. 마지막 1건만 되돌릴 수 있으므로 통째로 떠 둔다.
+     *
+     * 보정 기록과 알림 소스까지 담는 이유: '로컬 데이터 전체 삭제'가 그 둘도 비우는데
+     * 예전 스냅샷은 카드·거래·설정만 담아서, 되돌려도 보정 기록이 돌아오지 않았다.
+     * 화면은 "삭제 직후 4.2초 안에는 되돌릴 수 있습니다"라고 약속하고 있다.
+     */
+    data class Snapshot(
+        val takenAt: Long,
+        val cards: List<Card>,
+        val txns: List<Txn>,
+        val adjustments: List<Adjustment>,
+        val sourceApps: List<SourceApp>,
+        val settings: Map<String, String>,
+    )
 
     suspend fun snapshot(): Snapshot = Snapshot(
+        takenAt = System.currentTimeMillis(),
         cards = db.cardDao().all(),
         txns = db.txnDao().all(),
+        adjustments = db.adjustmentDao().all(),
+        sourceApps = db.sourceAppDao().all(),
         settings = db.settingDao().let { dao ->
             Settings.ALL_KEYS.mapNotNull { key -> dao.get(key)?.let { key to it } }.toMap()
         },
     )
 
     suspend fun restore(snapshot: Snapshot) {
+        // 스냅샷을 뜬 뒤 도착한 결제는 되돌리기와 아무 상관이 없다. 예전에는 거래 테이블을
+        // 통째로 비우고 스냅샷을 다시 넣어서, 되돌리기를 누르기까지의 4.2초 사이에 들어온
+        // 결제가 조용히 사라졌다.
+        val snapshotIds = snapshot.txns.mapTo(mutableSetOf()) { it.id }
+        val arrivedAfter = db.txnDao().all().filter {
+            it.id !in snapshotIds && it.receivedAt >= snapshot.takenAt
+        }
+
         db.cardDao().clear()
         db.txnDao().clear()
+        db.adjustmentDao().clear()
         snapshot.cards.forEach { db.cardDao().upsert(it) }
         snapshot.txns.forEach { db.txnDao().upsert(it) }
+        arrivedAfter.forEach { db.txnDao().upsert(it) }
+        snapshot.adjustments.forEach { db.adjustmentDao().upsert(it) }
+        // 알림 소스는 지우지 않고 덮어쓰기만 한다. 그 사이 처음 알림을 띄운 앱을
+        // 목록에서 떨어뜨리면, 사용자가 켤 대상이 사라진다.
+        snapshot.sourceApps.forEach { db.sourceAppDao().upsert(it) }
         snapshot.settings.forEach { (key, value) -> db.settingDao().put(Setting(key, value)) }
     }
 
@@ -306,8 +359,14 @@ class DulSsenRepository private constructor(private val context: Context) {
     // ---------------------------------------------------------------- 전체 삭제
 
     /**
-     * 로컬 데이터 전체 삭제. 테이블을 비운 뒤 DB 파일과 암호를 함께 버린다.
-     * 암호를 지우는 이유: 파일 시스템에 남은 조각이 나중에라도 복호화되지 않게 하려는 것이다.
+     * 로컬 데이터 전체 삭제.
+     *
+     * `DELETE FROM` 만으로는 부족하다. SQLite 는 지운 페이지를 free list 에 남겨 두므로
+     * 거래 내용이 파일 조각으로 남는다. 그래서 마지막에 `VACUUM` 으로 파일을 다시 쓴다.
+     * 되돌리기는 메모리 스냅샷에서 복원하므로 여기서 파일을 정리해도 영향이 없다.
+     *
+     * DB 파일과 Keystore 키까지 버리는 길도 있었지만 쓰지 않는다 — 프로세스를 다시 띄워야
+     * 안전한데 그 흐름이 없고, 테이블이 비고 VACUUM 까지 끝나면 남은 파일에 풀어낼 것이 없다.
      */
     suspend fun wipeAll() {
         db.txnDao().clear()
@@ -316,40 +375,51 @@ class DulSsenRepository private constructor(private val context: Context) {
         db.sourceAppDao().clear()
         db.cycleSnapshotDao().clear()
         db.settingDao().clear()
-    }
-
-    /** 앱을 완전히 초기화한다. 호출 뒤 프로세스를 종료해야 안전하다. */
-    fun destroyDatabaseFile() {
-        AppDatabase.closeAndForget()
-        context.deleteDatabase(AppDatabase.DB_NAME)
-        DbPassphrase.destroy(context)
+        withContext(Dispatchers.IO) {
+            runCatching { db.openHelper.writableDatabase.execSQL("VACUUM") }
+        }
     }
 
     // ---------------------------------------------------------------- 내보내기·불러오기
 
     /**
-     * 전체 데이터를 JSON으로 직렬화한다.
-     * 암호화는 호출자(UI)에서 처리한다.
+     * 전체 데이터를 직렬화 가능한 형태로 모은다.
+     * **암호화는 호출자가 [com.msyim.dulssencard.data.crypto.BackupCrypto] 로 한다.**
+     * 이 함수가 돌려주는 것은 평문이므로 그대로 디스크에 쓰면 안 된다.
      */
     suspend fun exportData(): BackupData = BackupData(
-        version = 1,
+        version = BACKUP_VERSION,
         exportedAt = System.currentTimeMillis(),
         cards = db.cardDao().all(),
         txns = db.txnDao().all(),
         adjustments = db.adjustmentDao().all(),
+        sourceApps = db.sourceAppDao().all(),
         settings = db.settingDao().let { dao ->
             Settings.ALL_KEYS.mapNotNull { key -> dao.get(key)?.let { Setting(key, it) } }
         },
     )
 
+    /** 불러온 건수. 화면에 "무엇이 얼마나 들어왔는지" 그대로 보여 준다. */
+    data class ImportCounts(val cards: Int, val txns: Int)
+
     /**
-     * 백업 데이터를 복원한다. 기존 데이터와 병합하며, 중복은 무시한다.
+     * 백업 데이터를 복원한다. 기존 데이터와 **병합**하며 같은 id 는 덮어쓴다.
+     *
+     * 거래 id 가 UUID 라 서로 다른 기기의 백업을 합쳐도 충돌하지 않는다. 같은 결제가
+     * 두 백업에 들어 있으면 지문 유니크 인덱스가 뒤엣것을 막는다.
+     *
+     * @throws IllegalArgumentException 이 앱이 모르는 미래 형식일 때.
      */
-    suspend fun importData(data: BackupData) {
+    suspend fun importData(data: BackupData): ImportCounts {
+        require(data.version in 1..BACKUP_VERSION) {
+            "지원하지 않는 백업 형식입니다 (version=${data.version})"
+        }
         data.cards.forEach { db.cardDao().upsert(it) }
         data.txns.forEach { db.txnDao().upsert(it) }
         data.adjustments.forEach { db.adjustmentDao().upsert(it) }
+        data.sourceApps.forEach { db.sourceAppDao().upsert(it) }
         data.settings.forEach { db.settingDao().put(it) }
+        return ImportCounts(cards = data.cards.size, txns = data.txns.size)
     }
 
     @Serializable
@@ -360,6 +430,8 @@ class DulSsenRepository private constructor(private val context: Context) {
         val txns: List<Txn>,
         val adjustments: List<Adjustment>,
         val settings: List<Setting>,
+        /** 알림 소스 설정. 기기를 옮겨도 어떤 앱을 읽을지 다시 고르지 않게 한다. */
+        val sourceApps: List<SourceApp> = emptyList(),
     )
 
     companion object {
@@ -369,6 +441,9 @@ class DulSsenRepository private constructor(private val context: Context) {
          * 이보다 넓히면 "같은 금액 다른 결제"에 잘못 물릴 확률만 커진다.
          */
         const val CANCEL_LOOKBACK_MILLIS = 90L * 24 * 60 * 60 * 1000
+
+        /** 백업 파일 형식 버전. 필드를 더할 때마다 올리고, 옛 버전은 계속 읽을 수 있게 둔다. */
+        const val BACKUP_VERSION = 1
 
         @Volatile
         private var instance: DulSsenRepository? = null

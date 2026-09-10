@@ -99,6 +99,24 @@
         </activity>
 
         <!--
+          암호화 백업 파일을 공유 시트에 넘기기 위한 provider.
+
+          권한을 새로 선언하지 않는다 — exported="false" 라 다른 앱이 직접 붙을 수 없고,
+          사용자가 공유 시트에서 고른 앱에만 그 파일 하나에 대한 일회성 읽기 권한이 간다.
+          내부 저장소의 exports/ 만 열며(@xml/file_paths), 그 안에는
+          BackupCrypto 로 봉인한 파일만 놓인다.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!--
           유일한 수집 경로.
           BIND_NOTIFICATION_LISTENER_SERVICE 는 시스템만 바인딩할 수 있는 서명 권한이다.
         -->

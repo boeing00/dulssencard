@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,6 +17,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -32,6 +32,7 @@ import com.msyim.dulssencard.ingest.SourceGate
 import com.msyim.dulssencard.ui.component.CountBadge
 import com.msyim.dulssencard.ui.component.DsSnackbar
 import com.msyim.dulssencard.ui.component.Hairline
+import com.msyim.dulssencard.ui.screen.BackupPasswordDialog
 import com.msyim.dulssencard.ui.screen.CardEditScreen
 import com.msyim.dulssencard.ui.screen.CardListScreen
 import com.msyim.dulssencard.ui.screen.DetailScreen
@@ -67,6 +68,19 @@ fun DulSsenApp(viewModel: MainViewModel = viewModel()) {
                     onSelect = viewModel::go,
                 )
             }
+        }
+
+        state.backupPrompt?.let { prompt ->
+            BackupPasswordDialog(
+                prompt = prompt,
+                onDismiss = viewModel::dismissBackupPrompt,
+                onConfirm = { password ->
+                    when (prompt) {
+                        BackupPrompt.EXPORT -> viewModel.exportEncrypted(password)
+                        BackupPrompt.IMPORT -> viewModel.importBackup(password)
+                    }
+                },
+            )
         }
 
         state.toast?.let { toast ->
@@ -125,7 +139,7 @@ private fun ScreenContent(
             onOpenLimitSettings = { viewModel.go(Screen.SETTINGS) },
             onOpenPending = { viewModel.openInbox(InboxTab.PENDING) },
             onToggleSort = viewModel::toggleSort,
-            onCardClick = { viewModel.openInbox(InboxTab.ALL) },
+            onCardClick = viewModel::openCardTransactions,
             onOpenSettings = { viewModel.go(Screen.SETTINGS) },
         )
 
@@ -133,14 +147,18 @@ private fun ScreenContent(
             txns = state.txns,
             cards = state.cards,
             tab = state.inboxTab,
+            cardFilterId = state.cardFilterId,
             onSelectTab = viewModel::selectInboxTab,
+            onClearCardFilter = viewModel::clearCardFilter,
             onOpenTxn = { viewModel.openTxn(it.id, Screen.INBOX) },
         )
 
         Screen.DETAIL -> {
             val txn = state.txns.firstOrNull { it.id == state.selectedTxnId }
             if (txn == null) {
-                viewModel.go(Screen.INBOX)
+                // 되돌리기나 삭제로 거래가 사라진 경우. **컴포지션 도중에 상태를 바꾸면 안 된다** —
+                // 리컴포지션이 스스로를 다시 부르는 꼴이 된다. 부수효과로 미룬다.
+                LaunchedEffect(state.selectedTxnId) { viewModel.go(Screen.INBOX) }
             } else {
                 val repository = remember { DulSsenRepository.get(context) }
                 val adjustments by repository.adjustmentsFor(txn.id)
@@ -156,6 +174,10 @@ private fun ScreenContent(
                     onConfirm = { viewModel.confirmTxn(txn) },
                     onExclude = { viewModel.excludeTxn(txn) },
                     onRestore = { viewModel.restoreTxn(txn) },
+                    editingAmount = state.editingAmountTxnId == txn.id,
+                    onStartAmountEdit = { viewModel.startAmountEdit(txn) },
+                    onCancelAmountEdit = viewModel::cancelAmountEdit,
+                    onAmountCorrected = { viewModel.correctAmount(txn, it) },
                 )
             }
         }
@@ -192,7 +214,8 @@ private fun ScreenContent(
                 context.startActivity(SourceGate.notificationAccessSettingsIntent())
             },
             onOpenSourceApps = { viewModel.go(Screen.SOURCES) },
-            onExportEncrypted = viewModel::exportEncrypted,
+            onExportEncrypted = viewModel::requestExport,
+            onImportBackup = viewModel::requestImport,
             onImportFromImage = viewModel::requestImageImport,
             onWipe = viewModel::wipeAll,
         )
@@ -260,9 +283,3 @@ private fun BottomNav(current: Screen, pendingCount: Int, onSelect: (Screen) -> 
         }
     }
 }
-
-@Suppress("unused")
-private fun Modifier.unusedSpacer() = this.then(Modifier)
-
-@Composable
-private fun VerticalGap(height: androidx.compose.ui.unit.Dp) = Spacer(Modifier.height(height))
