@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
-    kotlin("plugin.serialization") version "2.1.0"
+    alias(libs.plugins.kotlin.serialization)
 }
 
 // 릴리스 서명 정보는 keystore.properties(git 미포함)에서 읽어온다.
@@ -27,7 +27,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 홈 광고 지면: 코드와 레이아웃은 존재하되 기본 비활성.
-        // Play 심사(SMS 민감권한) 통과 후 true 로 바꾸면 활성화된다.
+        // 켜는 순간 광고 SDK 가 INTERNET 권한을 매니페스트에 도로 끌고 들어와
+        // "네트워크 호출 없음" 고지와 알림 접근 심사 서사가 함께 깨진다(아래 dependencies 주석).
         buildConfigField("boolean", "ADS_ENABLED", "false")
     }
 
@@ -75,6 +76,14 @@ android {
         buildConfig = true
     }
 
+    // Room 이 뽑아 둔 스키마를 계측 테스트에서 읽을 수 있게 한다.
+    // MigrationTestHelper 가 이 파일들로 "마이그레이션 뒤 스키마가 선언과 같은가"를 검증한다.
+    sourceSets {
+        getByName("androidTest") {
+            assets.srcDirs("$projectDir/schemas")
+        }
+    }
+
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -110,14 +119,14 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.sqlcipher.android)
 
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("com.google.mlkit:text-recognition-korean:16.0.0")
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.mlkit.text.recognition.korean)
     // 온디바이스 Gemini Nano(com.google.mlkit:genai-prompt)는 **빼 두었다.**
     // 2026-09-08 갤럭시 S24+(SM-S926N, Android 16)에서 checkStatus() 가 UNAVAILABLE(0) 을
     // 돌려줬다. AICore 는 구글·삼성 둘 다 깔려 있지만 ML Kit GenAI 의 기기 허용 목록에
     // 아직 없다. 지원 기기가 늘면 다시 확인할 것 — 되면 API 키도 네트워크 전송도 없이
     // AI 파싱을 쓸 수 있어 지금 구조에서 가장 이상적이다.
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    implementation(libs.kotlinx.coroutines.play.services)
 
     // 광고 SDK는 의도적으로 빠져 있다.
     // 홈 광고 지면(320x50)의 레이아웃과 코드는 AdSlot.kt 에 있고 BuildConfig.ADS_ENABLED=false 로 꺼져 있다.
@@ -133,6 +142,8 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    // 마이그레이션 검증. 이게 없으면 스키마를 바꿀 때마다 사용자 데이터를 걸고 도박을 한다.
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

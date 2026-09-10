@@ -13,6 +13,13 @@ junit = "4.13.2"
 junitExt = "1.3.0"
 espressoCore = "3.7.0"
 coroutines = "1.10.2"
+serializationJson = "1.7.3"
+mlkitTextKorean = "16.0.0"
+# 직렬화 **컴파일러 플러그인**의 버전. 원칙적으로 Kotlin 컴파일러(kotlin = 위)와 같아야 한다.
+# AGP 9.2.1 이 Kotlin 2.3.21 을 내장하고 있어 지금은 어긋나 있는데, 올려서 돌려 보기 전에는
+# 안전한지 알 수 없다(CLAUDE.md §2 툴체인 함정 참고). 빌드를 돌릴 수 있을 때 kotlin 과
+# 맞춰 보고, 통과하면 이 항목을 지우고 version.ref = "kotlin" 으로 바꿀 것.
+kotlinSerializationPlugin = "2.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -36,9 +43,14 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitExt" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serializationJson" }
+kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
+mlkit-text-recognition-korean = { group = "com.google.mlkit", name = "text-recognition-korean", version.ref = "mlkitTextKorean" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinSerializationPlugin" }

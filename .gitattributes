@@ -1,0 +1,14 @@
+# 줄바꿈은 LF 로 통일한다.
+#
+# 이 파일이 없던 동안 PaymentParser.kt 하나만 CRLF 로 커밋돼 있었다. 거기에 리터럴 NUL
+# 문자까지 섞여서 git 이 그 파일을 **바이너리로 취급**했고, diff 가 통째로 보이지 않았다.
+# 하필 CLAUDE.md 가 "금액·가맹점을 잘못 읽으면 제일 먼저 볼 파일"로 지목한 파일이다.
+* text=auto eol=lf
+
+# Windows 배치 파일은 CRLF 여야 실행된다.
+*.bat text eol=crlf
+
+# 손대면 안 되는 것들.
+*.png binary
+*.ttf binary
+*.jar binary

@@ -195,6 +195,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch { seedSourceApps() }
+        viewModelScope.launch {
+            // 주기가 넘어가면 지난 주기 숫자는 다시 만들 수 없다. 화면은 아직 없지만
+            // 기록만은 지금부터 남긴다. 실패해도 앱은 그대로 돌아야 한다.
+            runCatching {
+                repository.recordClosedCycle(
+                    repository.getSetting(Settings.LIMIT_CYCLE_START_DAY)?.toIntOrNull()
+                        ?: Settings.DEFAULT_LIMIT_CYCLE_START_DAY,
+                )
+            }
+        }
         refreshPermissions()
     }
 
