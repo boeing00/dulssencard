@@ -67,6 +67,13 @@ enum class PendingReason(val message: String) {
     FOREIGN_CURRENCY("해외 승인이라 자동 반영하지 않았습니다"),
     INSTALLMENT("할부 거래라 자동 반영하지 않았습니다"),
     ZERO_AMOUNT("금액을 0원으로 읽어 자동 반영하지 않았습니다"),
+
+    /**
+     * **지금은 도달하지 않는다.** 파서가 시각을 못 읽으면 수신 시각으로 대신하고
+     * [Txn.occurredAtEstimated] 로 표시하기 때문이다(현대카드처럼 시각을 아예 안 적는
+     * 형식이 있어서 그렇게 바꿨다). 남겨 두는 이유는 둘이다 — 이 값으로 저장된 옛 거래가
+     * 있을 수 있고, 나중에 직접 입력 경로가 생기면 다시 쓰인다.
+     */
     UNKNOWN_TIME("거래 시각을 확인하지 못했습니다"),
     EXCLUDE_KEYWORD("카드의 제외 키워드에 걸렸습니다"),
     USER_EXCLUDED("사용자가 제외 처리했습니다"),

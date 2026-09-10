@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
     private fun onFlagRaised(select: (UiState) -> Boolean, action: () -> Unit) {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.state.map(select).distinctUntilChanged().collect { raised ->
+                viewModel.state.map { select(it) }.distinctUntilChanged().collect { raised ->
                     if (raised) action()
                 }
             }
