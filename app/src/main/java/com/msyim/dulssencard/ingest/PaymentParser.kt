@@ -77,12 +77,12 @@ object PaymentParser {
       * 쉼표 뒤 공백을 허용하는 이유: OCR 이 `16,000` 을 `16, 000` 으로 뱉는다(실기기 확인).
       * 허용하지 않으면 캡처 이미지에서 금액을 통째로 놓친다.
       */
-    private val WON_AMOUNT = Regex("""([0-9]{1,3}(?:,\s?[0-9]{3})+)\s*원""")
+    private val WON_AMOUNT = Regex("""([0-9]{1,3}(?:,\s?[0-9]{3})+|[0-9]+)\s*원""")
 
     /** `USD 12.00` 또는 `12.00 USD`. */
     private val FOREIGN_AMOUNT = Regex(
-        """(${KNOWN_CURRENCIES.joinToString("|")})\s*([0-9][0-9,]*\.?[0-9]*)|""" +
-            """([0-9][0-9,]*\.?[0-9]*)\s*(${KNOWN_CURRENCIES.joinToString("|")})""",
+        """(?:(${KNOWN_CURRENCIES.joinToString("|")})\s*([0-9][0-9,]*\.?[0-9]*)""" +
+            """|([0-9][0-9,]*\.?[0-9]*)\s*(${KNOWN_CURRENCIES.joinToString("|")}))""",
     )
 
     /** `09/06 19:42`, `09/06 19:42:11`, `2026/09/06 19:42`. */
