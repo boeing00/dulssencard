@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.DulSsenCard" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#F4F1E8</item>
+        <item name="android:navigationBarColor">#EDE9DC</item>
+        <item name="android:windowBackground">@color/paper</item>
+    </style>
+</resources>

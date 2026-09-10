@@ -1,0 +1,19 @@
+# Gradle / Android 빌드 산출물
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# 서명 키 — 절대 커밋하지 않는다
+keystore.properties
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 진단용 임시 파일
+*.log

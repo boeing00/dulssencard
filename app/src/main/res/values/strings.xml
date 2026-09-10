@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">덜쎈카드</string>
+    <!-- 시스템 '알림 접근' 설정 목록에 이 이름으로 보인다. -->
+    <string name="notification_listener_label">덜쎈카드 결제 알림 수집</string>
+</resources>

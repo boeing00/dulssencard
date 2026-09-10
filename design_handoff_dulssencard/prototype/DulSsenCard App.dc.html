@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><meta name="design_doc_mode" content="canvas"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"><style>body{margin:0;background:#E7E3D8;font-family:'IBM Plex Sans KR',system-ui,sans-serif;-webkit-font-smoothing:antialiased}a{color:#B23A12;text-decoration:none}a:hover{color:#8E2C0B}*{box-sizing:border-box}::-webkit-scrollbar{width:0;height:0}</style></helmet>
+<div style="display:flex;gap:56px;align-items:flex-start;padding:52px 60px 80px;min-height:100vh">
+
+<aside style="width:392px;flex:none;color:#17150F;padding-top:8px">
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.22em;text-transform:uppercase;color:#5A5344">PRD v4 · Implementation ready</div>
+<h1 style="font:600 42px/1.02 'IBM Plex Sans KR',sans-serif;letter-spacing:-.03em;margin:14px 0 0">덜쎈카드</h1>
+<p style="font:400 15px/1.65 'IBM Plex Sans KR',sans-serif;color:#4A4437;margin:12px 0 0;text-wrap:pretty">결제 SMS를 기기 안에서 분류해 카드별 추적 목표와 개인 구매 추적 한도의 진행 상황을 보여 주는 Android 앱. 오른쪽 프로토타입은 실제로 동작합니다 — 탭하고, SMS를 시뮬레이션하고, 거래를 보정해 보세요.</p>
+
+<div style="height:1px;background:#CFC9B9;margin:26px 0 22px"></div>
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344;margin-bottom:12px">디자인 판단</div>
+<div style="display:flex;flex-direction:column;gap:14px">
+<div style="display:flex;gap:12px"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;flex:none;width:22px">01</span><span style="font:400 13.5px/1.55 'IBM Plex Sans KR',sans-serif;color:#3D382C">홈의 정보 우선순위는 PRD 7절 그대로: <b style="font-weight:600">한도 → 카드별 남은 목표 → 확인 필요</b>. 숫자는 모노스페이스로 고정폭 정렬해 금액 비교가 눈으로 가능하게 했습니다.</span></div>
+<div style="display:flex;gap:12px"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;flex:none;width:22px">02</span><span style="font:400 13.5px/1.55 'IBM Plex Sans KR',sans-serif;color:#3D382C">‘개인 추적값’ 성격을 색으로 분리했습니다. 자동 반영은 잉크색, <b style="font-weight:600">확인 필요는 주황</b>, 완료 카드는 저대비로 하단 이동. 확정 실적처럼 보이는 표현은 쓰지 않았습니다.</span></div>
+<div style="display:flex;gap:12px"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;flex:none;width:22px">03</span><span style="font:400 13.5px/1.55 'IBM Plex Sans KR',sans-serif;color:#3D382C">보정은 <b style="font-weight:600">3동작 이내</b> — 거래 상세에서 목표/한도 포함을 각각 독립 토글하고, 마지막 1건은 스낵바에서 되돌립니다.</span></div>
+<div style="display:flex;gap:12px"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;flex:none;width:22px">04</span><span style="font:400 13.5px/1.55 'IBM Plex Sans KR',sans-serif;color:#3D382C">거래 상세에는 매칭 근거·파서 버전·신뢰도만 노출하고 <b style="font-weight:600">SMS 본문은 어디에도 표시하지 않습니다</b>(10절).</span></div>
+</div>
+
+<div style="height:1px;background:#CFC9B9;margin:24px 0 20px"></div>
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344;margin-bottom:12px">데모 조작</div>
+<button onClick="{{ simClear }}" style="width:100%;text-align:left;border:1px solid #17150F;background:#17150F;color:#F4F1E8;border-radius:2px;padding:13px 15px;font:500 13.5px/1.3 'IBM Plex Sans KR',sans-serif;cursor:pointer;display:flex;justify-content:space-between;gap:10px" style-hover="background:#2C281D">결제 SMS 수신 (단일 매칭)<span style="font:500 11px/1.4 'IBM Plex Mono',monospace;opacity:.6">AUTO</span></button>
+<button onClick="{{ simAmbig }}" style="width:100%;text-align:left;border:1px solid #B23A12;background:transparent;color:#B23A12;border-radius:2px;padding:13px 15px;font:500 13.5px/1.3 'IBM Plex Sans KR',sans-serif;cursor:pointer;margin-top:8px;display:flex;justify-content:space-between;gap:10px" style-hover="background:#F6E4DA">결제 SMS 수신 (다중 매칭)<span style="font:500 11px/1.4 'IBM Plex Mono',monospace;opacity:.7">PENDING</span></button>
+<button onClick="{{ reset }}" style="width:100%;text-align:left;border:1px solid #CFC9B9;background:transparent;color:#6B6455;border-radius:2px;padding:11px 15px;font:400 12.5px/1.3 'IBM Plex Sans KR',sans-serif;cursor:pointer;margin-top:8px" style-hover="border-color:#17150F;color:#17150F">데모 초기화 (온보딩부터)</button>
+
+<div style="margin-top:22px;font:400 12px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344;text-wrap:pretty">다음 단계로 좋습니다: P1 재스캔 동의 화면, 암호화 백업/복구 UX, 카드사 파서 템플릿 선택 UI. 필요하면 이어서 그립니다.</div>
+</aside>
+
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" width="{{ 412 }}" height="{{ 892 }}" hint-size="412px,892px">
+<div style="height:100%;display:flex;flex-direction:column;background:#F4F1E8;font-family:'IBM Plex Sans KR',sans-serif;color:#17150F;overflow:hidden;position:relative">
+
+<sc-if value="{{ isOnboard }}" hint-placeholder-val="{{ true }}">
+<div style="flex:1;overflow-y:auto;display:flex;flex-direction:column;padding:34px 26px 26px">
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.22em;text-transform:uppercase;color:#B23A12">STEP 1 / 3 · 권한 고지</div>
+<h2 style="font:600 31px/1.24 'IBM Plex Sans KR',sans-serif;letter-spacing:-.02em;margin:18px 0 0;text-wrap:pretty">결제 문자를<br>카드 목표로<br>자동 정리할게요</h2>
+<p style="font:400 14.5px/1.7 'IBM Plex Sans KR',sans-serif;color:#4A4437;margin:18px 0 0;text-wrap:pretty">덜쎈카드는 새로 도착하는 결제 SMS에서 카드사 키워드, 금액, 승인·취소 상태, 거래 시각을 <b style="font-weight:600">기기 안에서만</b> 추출해 개인 추적값을 계산합니다.</p>
+<div style="margin-top:22px;border-top:1px solid #DCD6C6;display:flex;flex-direction:column">
+<div style="display:flex;gap:12px;padding:13px 0;border-bottom:1px solid #DCD6C6"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;width:16px;flex:none">✓</span><span style="font:400 13.5px/1.5;color:#3D382C">SMS 원문과 주민등록번호는 저장·전송하지 않습니다</span></div>
+<div style="display:flex;gap:12px;padding:13px 0;border-bottom:1px solid #DCD6C6"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;width:16px;flex:none">✓</span><span style="font:400 13.5px/1.5;color:#3D382C">광고·마케팅·분석 목적으로 사용하지 않습니다</span></div>
+<div style="display:flex;gap:12px;padding:13px 0;border-bottom:1px solid #DCD6C6"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#B23A12;width:16px;flex:none">✓</span><span style="font:400 13.5px/1.5;color:#3D382C">Android 설정에서 언제든 권한을 해제할 수 있고, 해제하면 새 결제 자동 반영이 중단됩니다</span></div>
+<div style="display:flex;gap:12px;padding:13px 0"><span style="font:500 11px/1.5 'IBM Plex Mono',monospace;color:#5A5344;width:16px;flex:none">!</span><span style="font:400 13.5px/1.5;color:#6B6455">집계값은 사용자가 설정한 규칙에 따른 개인 추적값이며 카드사 공식 실적이 아닙니다</span></div>
+</div>
+<div style="flex:1;min-height:16px"></div>
+<button onClick="{{ grant }}" style="width:100%;border:none;background:#17150F;color:#F4F1E8;border-radius:2px;padding:17px;font:600 15px/1.2 'IBM Plex Sans KR',sans-serif;cursor:pointer" style-hover="background:#2C281D">SMS 자동 집계 켜기</button>
+<button onClick="{{ deny }}" style="width:100%;border:none;background:transparent;color:#6B6455;padding:15px;font:400 14px/1.2 'IBM Plex Sans KR',sans-serif;cursor:pointer;margin-top:4px" style-hover="color:#17150F">나중에 하기</button>
+</div>
+</sc-if>
+
+<sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:22px 22px 16px">
+<div style="display:flex;align-items:flex-end;gap:11px;min-width:0">
+<div style="display:flex;align-items:flex-end;gap:3px;flex:none;padding-bottom:6px">
+<span style="display:block;width:6px;height:13px;background:#DCD6C6;border-radius:1px"></span>
+<span style="display:block;width:6px;height:22px;background:#8A6238;border-radius:1px"></span>
+<span style="display:block;width:6px;height:32px;background:#17150F;border-radius:1px"></span>
+</div>
+<div style="min-width:0">
+<div style="font:600 9.5px/1 'IBM Plex Mono',monospace;letter-spacing:.24em;text-transform:uppercase;color:#6B6455">SMS → 추적</div>
+<h1 style="font:600 34px/1 'IBM Plex Sans KR',sans-serif;letter-spacing:-.035em;margin:7px 0 0;white-space:nowrap">덜쎈<span style="color:#B23A12">카드</span></h1>
+</div>
+</div>
+<span style="flex:none;font:500 11px/1 'IBM Plex Mono',monospace;letter-spacing:.08em;color:#4A4437;border:1px solid #DCD6C6;border-radius:999px;padding:6px 10px;white-space:nowrap">D-{{ daysLeft }}</span>
+</div>
+
+<div style="margin:0 22px;position:relative;border-radius:6px;overflow:hidden">
+<div style="position:absolute;inset:0;background:#E9DECB;pointer-events:none"></div>
+<div style="position:relative;background:linear-gradient(168deg,#F6EFE1 0%,#EADFCB 52%,#DCCDB2 100%);border:1px solid rgba(255,255,255,.75);border-radius:6px;box-shadow:0 12px 24px rgba(90,66,38,.18),0 2px 4px rgba(90,66,38,.14),inset 0 1px 0 rgba(255,255,255,.9),inset 0 -14px 26px rgba(150,118,76,.16);color:#2E2415;padding:20px 20px 18px">
+<div style="display:flex;justify-content:space-between;align-items:baseline">
+<span style="font:500 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#6B5535">개인 구매 추적 한도</span>
+<span onClick="{{ goSettings }}" style="font:400 11px/1 'IBM Plex Sans KR',sans-serif;color:#4A3A22;cursor:pointer;border-bottom:1px solid rgba(74,58,34,.4)">한도 설정</span>
+</div>
+<div style="margin-top:14px">
+<span style="display:block;font:500 28px/1.15 'IBM Plex Mono',monospace;letter-spacing:-.02em;white-space:nowrap">{{ limitUsed }}</span>
+<span style="display:block;font:400 13px/1.4 'IBM Plex Mono',monospace;color:#6B5535;white-space:nowrap;margin-top:3px">한도 {{ limitTotal }}</span>
+</div>
+<div style="height:10px;background:rgba(90,66,38,.20);border-radius:1px;margin-top:16px;overflow:hidden;display:flex;box-shadow:inset 0 1px 2px rgba(90,66,38,.28)">
+<div style="height:100%;background:linear-gradient(180deg,#5A4426,#3A2B15);width:{{ limitPct }}%;transition:width .45s cubic-bezier(.2,.8,.2,1)"></div>
+</div>
+<div style="display:flex;justify-content:space-between;gap:10px;margin-top:10px">
+<span style="font:400 12.5px/1.4 'IBM Plex Sans KR',sans-serif;color:#5A4728;white-space:nowrap">남은 금액 <b style="font-family:'IBM Plex Mono',monospace;font-weight:500;color:#2E2415">{{ limitLeft }}</b></span>
+<span style="flex:none;font:400 11px/1.4 'IBM Plex Mono',monospace;color:#6B5535;white-space:nowrap">{{ limitPctLabel }}</span>
+</div>
+</div>
+</div>
+<div style="margin:9px 22px 0;font:400 11px/1.5 'IBM Plex Sans KR',sans-serif;color:#5A5344;text-wrap:pretty">사용자 설정과 SMS 분류에 따른 추적값이며 카드사 공식 실적과 다를 수 있습니다.</div>
+
+<sc-if value="{{ hasPending }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ goInbox }}" style="margin:16px 22px 0;border:1px solid #B23A12;background:#F9E9E0;border-radius:3px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer" style-hover="background:#F4DFD3">
+<span style="font:500 13.5px/1.3 'IBM Plex Sans KR',sans-serif;color:#8E2C0B">확인 필요 {{ pendingCount }}건 — 합계에 반영되지 않음</span>
+<span style="font:500 15px/1 'IBM Plex Mono',monospace;color:#B23A12">→</span>
+</div>
+</sc-if>
+
+<div style="display:flex;align-items:baseline;justify-content:space-between;padding:26px 22px 10px">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344">카드별 남은 목표</span>
+<span onClick="{{ toggleSort }}" style="font:400 11.5px/1 'IBM Plex Sans KR',sans-serif;color:#6B6455;cursor:pointer;border-bottom:1px solid #DCD6C6">{{ sortLabel }}</span>
+</div>
+<div style="border-top:1px solid #DCD6C6">
+<sc-for list="{{ cardRows }}" as="c" hint-placeholder-count="3">
+<div onClick="{{ c.open }}" style="padding:16px 22px 17px;border-bottom:1px solid #DCD6C6;cursor:pointer;opacity:{{ c.dim }}" style-hover="background:#EDE9DC">
+<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">
+<span style="font:500 15.5px/1.3 'IBM Plex Sans KR',sans-serif">{{ c.nickname }}</span>
+<span style="font:500 17px/1 'IBM Plex Mono',monospace;color:{{ c.leftColor }}">{{ c.left }}</span>
+</div>
+<div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:7px">
+<span style="font:400 12px/1.3 'IBM Plex Mono',monospace;color:#6B6455">{{ c.used }} / {{ c.target }}</span>
+<span style="font:400 10.5px/1.3 'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:{{ c.statusColor }}">{{ c.status }}</span>
+</div>
+<div style="height:5px;background:#DCD6C6;border-radius:1px;margin-top:10px;overflow:hidden">
+<div style="height:100%;background:{{ c.barColor }};width:{{ c.pct }}%;transition:width .45s cubic-bezier(.2,.8,.2,1)"></div>
+</div>
+<div style="font:400 11px/1.4 'IBM Plex Sans KR',sans-serif;color:#5A5344;margin-top:8px">{{ c.cycle }}</div>
+</div>
+</sc-for>
+</div>
+<div style="display:flex;justify-content:center;padding:18px 22px 4px">
+<div style="width:320px;height:50px;flex:none;position:relative;background:#EDE9DC;border:1px solid #DCD6C6;border-radius:2px;display:flex;align-items:center;gap:12px;padding:0 10px;overflow:hidden">
+<div style="width:34px;height:34px;flex:none;background:#DCD6C6;border-radius:2px"></div>
+<div style="flex:1;min-width:0">
+<div style="font:500 12px/1.25 'IBM Plex Sans KR',sans-serif;color:#3D382C;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">광고 소재 영역 · 320×50</div>
+<div style="font:400 10.5px/1.3 'IBM Plex Sans KR',sans-serif;color:#4A4437;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">비타게팅 · 거래 데이터를 사용하지 않습니다</div>
+</div>
+<span style="position:absolute;top:0;right:0;font:600 8.5px/1 'IBM Plex Mono',monospace;letter-spacing:.1em;background:#4A4437;color:#F4F1E8;padding:3px 4px;border-radius:0 0 0 2px">AD</span>
+</div>
+</div>
+<div style="padding:18px 22px 28px;font:400 11px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344">완료된 카드는 하단으로 이동하며 낮은 대비로 표시됩니다. 카드사 공식 인정 여부는 앱이 판정하지 않습니다.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isInbox }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="padding:20px 22px 12px">
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:#5A5344">거래 결과함</div>
+<h2 style="font:600 25px/1.2 'IBM Plex Sans KR',sans-serif;letter-spacing:-.02em;margin:10px 0 0">{{ tabTitle }}</h2>
+</div>
+<div style="display:flex;gap:6px;padding:6px 22px 14px">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+<span onClick="{{ t.pick }}" style="font:500 12px/1 'IBM Plex Sans KR',sans-serif;padding:9px 12px;border-radius:999px;cursor:pointer;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.fg }}">{{ t.label }}</span>
+</sc-for>
+</div>
+<div style="border-top:1px solid #DCD6C6">
+<sc-for list="{{ txRows }}" as="t" hint-placeholder-count="4">
+<div onClick="{{ t.open }}" style="padding:15px 22px;border-bottom:1px solid #DCD6C6;cursor:pointer;display:flex;gap:14px;align-items:flex-start" style-hover="background:#EDE9DC">
+<div style="width:3px;align-self:stretch;background:{{ t.accent }};flex:none;border-radius:2px"></div>
+<div style="flex:1;min-width:0">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline">
+<span style="font:500 14.5px/1.3 'IBM Plex Sans KR',sans-serif">{{ t.merchant }}</span>
+<span style="font:500 15px/1 'IBM Plex Mono',monospace;color:{{ t.amountColor }}">{{ t.amount }}</span>
+</div>
+<div style="display:flex;justify-content:space-between;gap:10px;margin-top:6px">
+<span style="font:400 11.5px/1.4 'IBM Plex Sans KR',sans-serif;color:#6B6455">{{ t.cardName }} · {{ t.time }}</span>
+<span style="font:400 10.5px/1.4 'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase;color:{{ t.accent }}">{{ t.status }}</span>
+</div>
+<sc-if value="{{ t.hasReason }}" hint-placeholder-val="{{ false }}">
+<div style="font:400 11.5px/1.5 'IBM Plex Sans KR',sans-serif;color:#8E2C0B;margin-top:7px;background:#F9E9E0;border-radius:2px;padding:7px 9px">{{ t.reason }}</div>
+</sc-if>
+</div>
+</div>
+</sc-for>
+</div>
+<sc-if value="{{ txEmpty }}" hint-placeholder-val="{{ false }}">
+<div style="padding:56px 30px;text-align:center">
+<div style="font:500 13.5px/1.6 'IBM Plex Sans KR',sans-serif;color:#6B6455">해당하는 거래가 없습니다</div>
+<div style="font:400 12px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344;margin-top:6px">새 결제 SMS가 도착하면 여기에 정리됩니다.</div>
+</div>
+</sc-if>
+<div style="height:20px"></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDetail }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="padding:18px 22px 0">
+<span onClick="{{ back }}" style="font:500 12px/1 'IBM Plex Mono',monospace;color:#6B6455;cursor:pointer" style-hover="color:#17150F">← 결과함</span>
+</div>
+<div style="padding:18px 22px 20px;border-bottom:1px solid #DCD6C6">
+<div style="font:400 10.5px/1.4 'IBM Plex Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:{{ d.accent }}">{{ d.status }}</div>
+<div style="font:500 36px/1.05 'IBM Plex Mono',monospace;letter-spacing:-.03em;margin-top:12px;color:{{ d.amountColor }}">{{ d.amount }}</div>
+<div style="font:500 15px/1.4 'IBM Plex Sans KR',sans-serif;margin-top:10px">{{ d.merchant }}</div>
+<div style="font:400 12.5px/1.4 'IBM Plex Mono',monospace;color:#6B6455;margin-top:5px">{{ d.time }}</div>
+</div>
+
+<div style="padding:16px 22px 8px;font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344">카드</div>
+<div style="padding:0 22px 16px;display:flex;flex-wrap:wrap;gap:7px">
+<sc-for list="{{ d.cardOptions }}" as="o" hint-placeholder-count="3">
+<span onClick="{{ o.pick }}" style="font:500 12.5px/1 'IBM Plex Sans KR',sans-serif;padding:11px 13px;border-radius:2px;cursor:pointer;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.fg }}">{{ o.label }}</span>
+</sc-for>
+</div>
+
+<div style="border-top:1px solid #DCD6C6">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 22px;border-bottom:1px solid #DCD6C6">
+<div><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif">목표 추적 포함</div><div style="font:400 11.5px/1.4;color:#5A5344;margin-top:4px">카드 월간 추적 목표에 합산</div></div>
+<span onClick="{{ d.toggleTarget }}" style="flex:none;width:52px;height:30px;border-radius:999px;background:{{ d.targetBg }};position:relative;cursor:pointer;transition:background .2s"><span style="position:absolute;top:3px;left:{{ d.targetX }}px;width:24px;height:24px;border-radius:999px;background:#F4F1E8;transition:left .2s cubic-bezier(.2,.8,.2,1)"></span></span>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 22px;border-bottom:1px solid #DCD6C6">
+<div><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif">구매 추적 한도 포함</div><div style="font:400 11.5px/1.4;color:#5A5344;margin-top:4px">개인 구매 추적 한도에 합산</div></div>
+<span onClick="{{ d.toggleLimit }}" style="flex:none;width:52px;height:30px;border-radius:999px;background:{{ d.limitBg }};position:relative;cursor:pointer;transition:background .2s"><span style="position:absolute;top:3px;left:{{ d.limitX }}px;width:24px;height:24px;border-radius:999px;background:#F4F1E8;transition:left .2s cubic-bezier(.2,.8,.2,1)"></span></span>
+</div>
+</div>
+
+<div style="padding:18px 22px 8px;font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344">매칭 근거</div>
+<div style="margin:0 22px;border:1px solid #DCD6C6;border-radius:3px;background:#EDE9DC">
+<sc-for list="{{ d.evidence }}" as="e" hint-placeholder-count="3">
+<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 14px;border-bottom:1px solid #DCD6C6"><span style="font:400 11.5px/1.4 'IBM Plex Sans KR',sans-serif;color:#6B6455">{{ e.k }}</span><span style="font:500 11.5px/1.4 'IBM Plex Mono',monospace">{{ e.v }}</span></div>
+</sc-for>
+<div style="padding:11px 14px;font:400 11px/1.5 'IBM Plex Sans KR',sans-serif;color:#5A5344">SMS 본문은 저장·표시하지 않습니다.</div>
+</div>
+
+<div style="padding:18px 22px 8px;font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:#5A5344">변경 기록</div>
+<div style="padding:0 22px">
+<sc-for list="{{ d.log }}" as="l" hint-placeholder-count="1">
+<div style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid #DCD6C6"><span style="font:400 11px/1.5 'IBM Plex Mono',monospace;color:#5A5344;flex:none">{{ l.at }}</span><span style="font:400 12px/1.5 'IBM Plex Sans KR',sans-serif;color:#3D382C">{{ l.text }}</span></div>
+</sc-for>
+<sc-if value="{{ d.logEmpty }}" hint-placeholder-val="{{ false }}">
+<div style="font:400 12px/1.5 'IBM Plex Sans KR',sans-serif;color:#5A5344;padding:4px 0">아직 보정 기록이 없습니다.</div>
+</sc-if>
+</div>
+
+<div style="padding:22px 22px 30px;display:flex;gap:8px">
+<button onClick="{{ d.primary }}" style="flex:1;border:1px solid #17150F;background:#17150F;color:#F4F1E8;border-radius:2px;padding:15px;font:500 14px/1.2 'IBM Plex Sans KR',sans-serif;cursor:pointer" style-hover="background:#2C281D">{{ d.primaryLabel }}</button>
+<button onClick="{{ d.secondary }}" style="flex:1;border:1px solid #B23A12;background:transparent;color:#B23A12;border-radius:2px;padding:15px;font:500 14px/1.2 'IBM Plex Sans KR',sans-serif;cursor:pointer" style-hover="background:#F6E4DA">{{ d.secondaryLabel }}</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCards }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="padding:20px 22px 14px;display:flex;align-items:flex-end;justify-content:space-between">
+<div>
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:#5A5344">카드 설정</div>
+<h2 style="font:600 25px/1.2 'IBM Plex Sans KR',sans-serif;letter-spacing:-.02em;margin:10px 0 0">{{ cardCount }}장 추적 중</h2>
+</div>
+<span onClick="{{ newCard }}" style="font:500 12.5px/1 'IBM Plex Sans KR',sans-serif;border:1px solid #17150F;border-radius:2px;padding:10px 12px;cursor:pointer" style-hover="background:#17150F;color:#F4F1E8">+ 카드 추가</span>
+</div>
+<div style="border-top:1px solid #DCD6C6">
+<sc-for list="{{ cardRows }}" as="c" hint-placeholder-count="3">
+<div onClick="{{ c.edit }}" style="padding:16px 22px;border-bottom:1px solid #DCD6C6;cursor:pointer" style-hover="background:#EDE9DC">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+<span style="font:500 15px/1.3 'IBM Plex Sans KR',sans-serif">{{ c.nickname }}</span>
+<span style="font:400 11.5px/1 'IBM Plex Mono',monospace;color:#6B6455">목표 {{ c.target }}</span>
+</div>
+<div style="font:400 11.5px/1.5 'IBM Plex Sans KR',sans-serif;color:#5A5344;margin-top:6px">인식 키워드 {{ c.kw }} · 매월 {{ c.startDay }}일 시작</div>
+</div>
+</sc-for>
+</div>
+<div style="padding:18px 22px 30px;font:400 11.5px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344">동일 키워드를 여러 카드에 저장하면 해당 거래는 자동 반영하지 않고 확인 결과함으로 이동합니다.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isEdit }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="padding:18px 22px 0"><span onClick="{{ back }}" style="font:500 12px/1 'IBM Plex Mono',monospace;color:#6B6455;cursor:pointer" style-hover="color:#17150F">← 카드</span></div>
+<h2 style="font:600 25px/1.2 'IBM Plex Sans KR',sans-serif;letter-spacing:-.02em;margin:14px 22px 0">{{ editTitle }}</h2>
+<div style="padding:20px 22px 0;display:flex;flex-direction:column;gap:18px">
+<label style="display:block">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">별명 · 필수</span>
+<input value="{{ form.nickname }}" onChange="{{ setNick }}" placeholder="예: 신한 딥드림" style="width:100%;margin-top:9px;border:none;border-bottom:1px solid #17150F;background:transparent;padding:9px 0;font:400 17px/1.3 'IBM Plex Sans KR',sans-serif;color:#17150F;outline:none" />
+</label>
+<label style="display:block">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">월간 추적 목표 · 필수</span>
+<div style="display:flex;align-items:center;gap:8px;margin-top:9px;border-bottom:1px solid #17150F">
+<input value="{{ form.target }}" onChange="{{ setTarget }}" placeholder="300,000" style="flex:1;min-width:0;border:none;background:transparent;padding:0;height:36px;font:500 17px/36px 'IBM Plex Mono',monospace;color:#17150F;outline:none" />
+<span style="flex:none;font:400 14px/36px 'IBM Plex Sans KR',sans-serif;color:#6B6455">원</span>
+</div>
+</label>
+<label style="display:block">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">인식 키워드 · 1개 이상</span>
+<input value="{{ form.keywords }}" onChange="{{ setKw }}" placeholder="신한, 신한카드" style="width:100%;margin-top:9px;border:none;border-bottom:1px solid #17150F;background:transparent;padding:9px 0;font:400 15px/1.3 'IBM Plex Sans KR',sans-serif;color:#17150F;outline:none" />
+<span style="display:block;font:400 11px/1.5;color:#5A5344;margin-top:7px">쉼표로 구분. 발신 SMS에서 이 키워드를 찾습니다.</span>
+</label>
+<label style="display:block">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">제외 키워드 · 선택</span>
+<input value="{{ form.exclude }}" onChange="{{ setEx }}" placeholder="해외, 할부" style="width:100%;margin-top:9px;border:none;border-bottom:1px solid #DCD6C6;background:transparent;padding:9px 0;font:400 15px/1.3 'IBM Plex Sans KR',sans-serif;color:#17150F;outline:none" />
+</label>
+<div>
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">주기 시작일 · 1~28</span>
+<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+<sc-for list="{{ dayOptions }}" as="dy" hint-placeholder-count="8">
+<span onClick="{{ dy.pick }}" style="font:500 12.5px/1 'IBM Plex Mono',monospace;width:38px;height:38px;display:flex;align-items:center;justify-content:center;border-radius:2px;cursor:pointer;border:1px solid {{ dy.border }};background:{{ dy.bg }};color:{{ dy.fg }}">{{ dy.d }}</span>
+</sc-for>
+</div>
+</div>
+<div style="border-top:1px solid #DCD6C6">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 0;border-bottom:1px solid #DCD6C6">
+<span style="font:500 13.5px/1.3 'IBM Plex Sans KR',sans-serif">기본값: 목표 추적 포함</span>
+<span onClick="{{ toggleFormTarget }}" style="flex:none;width:52px;height:30px;border-radius:999px;background:{{ form.targetBg }};position:relative;cursor:pointer"><span style="position:absolute;top:3px;left:{{ form.targetX }}px;width:24px;height:24px;border-radius:999px;background:#F4F1E8;transition:left .2s"></span></span>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:15px 0">
+<span style="font:500 13.5px/1.3 'IBM Plex Sans KR',sans-serif">기본값: 구매 추적 한도 포함</span>
+<span onClick="{{ toggleFormLimit }}" style="flex:none;width:52px;height:30px;border-radius:999px;background:{{ form.limitBg }};position:relative;cursor:pointer"><span style="position:absolute;top:3px;left:{{ form.limitX }}px;width:24px;height:24px;border-radius:999px;background:#F4F1E8;transition:left .2s"></span></span>
+</div>
+</div>
+<button onClick="{{ saveCard }}" style="width:100%;border:none;background:#17150F;color:#F4F1E8;border-radius:2px;padding:16px;font:600 14.5px/1.2 'IBM Plex Sans KR',sans-serif;cursor:pointer;margin-bottom:30px" style-hover="background:#2C281D">{{ saveLabel }}</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;overflow-y:auto">
+<div style="padding:20px 22px 14px">
+<div style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:#5A5344">설정</div>
+<h2 style="font:600 25px/1.2 'IBM Plex Sans KR',sans-serif;letter-spacing:-.02em;margin:10px 0 0">한도와 내 데이터</h2>
+</div>
+<div style="margin:6px 22px 0;border:1px solid #DCD6C6;border-radius:3px;padding:16px">
+<span style="font:600 10px/1 'IBM Plex Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:#5A5344">개인 구매 추적 한도</span>
+<div style="display:flex;align-items:center;gap:8px;margin-top:10px;border-bottom:1px solid #17150F">
+<input value="{{ limitInput }}" onChange="{{ setLimit }}" style="flex:1;min-width:0;border:none;background:transparent;padding:0;height:38px;font:500 22px/38px 'IBM Plex Mono',monospace;color:#17150F;outline:none" />
+<span style="flex:none;font:400 14px/38px 'IBM Plex Sans KR',sans-serif;color:#6B6455">원</span>
+</div>
+<div style="font:400 11.5px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344;margin-top:9px">기본값 1,000,000원은 제안값일 뿐이며 언제든 바꿀 수 있습니다. 카드 주기와 독립적으로 계산됩니다.</div>
+</div>
+<div style="margin-top:22px;border-top:1px solid #DCD6C6">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 22px;border-bottom:1px solid #DCD6C6">
+<div><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif">SMS 자동 집계</div><div style="font:400 11.5px/1.5;color:#5A5344;margin-top:4px">{{ smsStateLabel }}</div></div>
+<span onClick="{{ toggleSms }}" style="flex:none;width:52px;height:30px;border-radius:999px;background:{{ smsBg }};position:relative;cursor:pointer;transition:background .2s"><span style="position:absolute;top:3px;left:{{ smsX }}px;width:24px;height:24px;border-radius:999px;background:#F4F1E8;transition:left .2s"></span></span>
+</div>
+<div style="padding:16px 22px;border-bottom:1px solid #DCD6C6"><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif">암호화 내보내기<span style="font:500 9.5px/1 'IBM Plex Mono',monospace;letter-spacing:.1em;color:#B23A12;border:1px solid #B23A12;border-radius:2px;padding:3px 5px;margin-left:8px">P1</span></div><div style="font:400 11.5px/1.5;color:#5A5344;margin-top:5px">비밀번호를 잃어버리면 복구할 수 없습니다.</div></div>
+<div style="padding:16px 22px;border-bottom:1px solid #DCD6C6"><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif">최근 14일 내역 불러오기<span style="font:500 9.5px/1 'IBM Plex Mono',monospace;letter-spacing:.1em;color:#B23A12;border:1px solid #B23A12;border-radius:2px;padding:3px 5px;margin-left:8px">P1</span></div><div style="font:400 11.5px/1.5;color:#5A5344;margin-top:5px">누를 때만 읽기 권한을 별도로 설명·요청합니다.</div></div>
+<div onClick="{{ wipe }}" style="padding:16px 22px;border-bottom:1px solid #DCD6C6;cursor:pointer" style-hover="background:#F9E9E0"><div style="font:500 14px/1.3 'IBM Plex Sans KR',sans-serif;color:#B23A12">로컬 데이터 전체 삭제</div><div style="font:400 11.5px/1.5;color:#5A5344;margin-top:5px">카드·거래·보정 기록이 기기에서 지워집니다.</div></div>
+</div>
+<div style="padding:20px 22px 30px;font:400 11px/1.6 'IBM Plex Sans KR',sans-serif;color:#5A5344">로컬 DB는 Android Keystore 기반 키로 암호화됩니다. SMS 원문·주민등록번호·카드번호·CVC는 저장하지 않습니다.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:14px;right:14px;bottom:{{ toastBottom }}px;background:#17150F;color:#F4F1E8;border-radius:3px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:0 8px 24px rgba(0,0,0,.22)">
+<span style="font:400 13px/1.45 'IBM Plex Sans KR',sans-serif">{{ toastText }}</span>
+<sc-if value="{{ canUndo }}" hint-placeholder-val="{{ false }}">
+<span onClick="{{ undo }}" style="font:600 12.5px/1 'IBM Plex Sans KR',sans-serif;color:#D9F24A;cursor:pointer;flex:none">되돌리기</span>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ showNav }}" hint-placeholder-val="{{ false }}">
+<div style="flex:none;display:flex;border-top:1px solid #DCD6C6;background:#EDE9DC">
+<sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+<div onClick="{{ n.go }}" style="flex:1;padding:13px 4px 15px;text-align:center;cursor:pointer;border-top:2px solid {{ n.mark }};position:relative">
+<div style="font:500 12.5px/1.3 'IBM Plex Sans KR',sans-serif;color:{{ n.fg }}">{{ n.label }}</div>
+<sc-if value="{{ n.badge }}" hint-placeholder-val="{{ false }}">
+<span style="position:absolute;top:9px;right:50%;margin-right:-30px;background:#B23A12;color:#F4F1E8;font:600 9.5px/1 'IBM Plex Mono',monospace;border-radius:999px;padding:3px 5px">{{ n.badgeText }}</span>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;accentColor&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#B23A12&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;options&quot;:[&quot;#B23A12&quot;,&quot;#8E2C0B&quot;,&quot;#1F5FA8&quot;,&quot;#0B6B5B&quot;],&quot;section&quot;:&quot;테마&quot;},&quot;defaultLimit&quot;:{&quot;editor&quot;:&quot;int&quot;,&quot;default&quot;:1000000,&quot;min&quot;:100000,&quot;max&quot;:5000000,&quot;step&quot;:100000,&quot;unit&quot;:&quot;원&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;기본값&quot;},&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;onboard&quot;,&quot;options&quot;:[&quot;onboard&quot;,&quot;home&quot;,&quot;inbox&quot;,&quot;cards&quot;,&quot;settings&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;데모&quot;}}">
+const WON = n => (n < 0 ? '-' : '') + Math.abs(Math.round(n)).toLocaleString('ko-KR') + '원';
+const INK = '#17150F', ORANGE = '#B23A12', MUTE = '#5A5344', LINE = '#DCD6C6', GREEN = '#0B6B5B';
+
+class Component extends DCLogic {
+  constructor(p) {
+    super(p);
+    this.state = this.seed();
+  }
+
+  seed() {
+    const limit = this.props.defaultLimit ?? 1000000;
+    return {
+      screen: this.props.startScreen ?? 'onboard',
+      backTo: 'inbox',
+      tab: 'pending',
+      sort: 'left',
+      sel: null,
+      editId: null,
+      smsOn: false,
+      limitAmount: limit,
+      limitInput: limit.toLocaleString('ko-KR'),
+      toast: null,
+      undoSnap: null,
+      seq: 100,
+      form: { nickname: '', target: '', keywords: '', exclude: '', startDay: 1, dTarget: true, dLimit: true },
+      cards: [
+        { id: 'c1', nickname: '신한 딥드림', target: 500000, startDay: 1, kw: '신한, 신한카드', ex: '', dTarget: true, dLimit: true },
+        { id: 'c2', nickname: '하나 트래블로그', target: 300000, startDay: 15, kw: '하나카드', ex: '해외', dTarget: true, dLimit: true },
+        { id: 'c3', nickname: '현대 M 에디션', target: 400000, startDay: 5, kw: '현대카드', ex: '', dTarget: true, dLimit: false }
+      ],
+      txs: [
+        { id: 't1', cardId: 'c1', merchant: '이마트 성수', amount: 84300, at: '09/06 19:42', dir: 'approval', status: 'auto', target: true, limit: true, conf: 0.98, log: [] },
+        { id: 't2', cardId: 'c1', merchant: '스타벅스 서초', amount: 6200, at: '09/06 08:15', dir: 'approval', status: 'auto', target: true, limit: true, conf: 0.99, log: [] },
+        { id: 't3', cardId: null, merchant: '미확인 가맹점', amount: 129000, at: '09/05 21:03', dir: 'approval', status: 'pending', target: true, limit: true, conf: 0.61, reason: '키워드가 신한 딥드림·현대 M 에디션 두 카드와 일치합니다', log: [] },
+        { id: 't4', cardId: 'c2', merchant: '대한항공', amount: 412000, at: '09/04 13:20', dir: 'approval', status: 'auto', target: true, limit: true, conf: 0.97, log: [] },
+        { id: 't5', cardId: 'c2', merchant: '대한항공 취소', amount: 412000, at: '09/04 15:58', dir: 'cancel', status: 'auto', target: true, limit: true, conf: 0.96, log: [{ at: '09/04', text: '원 승인 거래와 연결됨' }] },
+        { id: 't6', cardId: 'c3', merchant: 'GS25 왕십리', amount: 12800, at: '09/03 22:41', dir: 'approval', status: 'auto', target: true, limit: false, conf: 0.99, log: [] },
+        { id: 't7', cardId: 'c3', merchant: '쿠팡', amount: 268400, at: '09/02 11:07', dir: 'approval', status: 'auto', target: true, limit: false, conf: 0.98, log: [] },
+        { id: 't8', cardId: null, merchant: '해외 승인 (USD)', amount: 0, at: '09/01 --:--', dir: 'approval', status: 'pending', target: true, limit: true, conf: 0.4, reason: '통화·금액 추출 실패로 자동 반영하지 않았습니다', log: [] },
+        { id: 't9', cardId: 'c1', merchant: '올리브영 홍대', amount: 39900, at: '08/31 17:22', dir: 'approval', status: 'excluded', target: true, limit: true, conf: 0.98, reason: '제외 키워드로 제외됨', log: [{ at: '08/31', text: '사용자가 제외 처리' }] }
+      ]
+    };
+  }
+
+  snap() { return { cards: this.state.cards, txs: this.state.txs, limitAmount: this.state.limitAmount }; }
+  say(text, undoable) {
+    this.setState({ toast: text, undoSnap: undoable ? this.snap() : null });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ toast: null, undoSnap: null }), 4200);
+  }
+  patchTx(id, patch, note) {
+    this.setState(s => ({
+      txs: s.txs.map(t => t.id === id ? Object.assign({}, t, patch, note ? { log: [{ at: '방금', text: note }].concat(t.log) } : {}) : t)
+    }));
+  }
+  signed(t) { return t.dir === 'cancel' ? -t.amount : t.amount; }
+
+  cardTotals(id) {
+    return this.state.txs.reduce((sum, t) => (t.cardId === id && t.status === 'auto' && t.target) ? sum + this.signed(t) : sum, 0);
+  }
+  limitTotal() {
+    return this.state.txs.reduce((sum, t) => (t.status === 'auto' && t.limit) ? sum + this.signed(t) : sum, 0);
+  }
+
+  renderVals() {
+    const s = this.state, accent = this.props.accentColor ?? '#B23A12';
+    const go = (screen, extra) => () => this.setState(Object.assign({ screen: screen, toast: null }, extra || {}));
+    const pending = s.txs.filter(t => t.status === 'pending');
+    const used = this.limitTotal();
+    const pct = Math.max(0, Math.min(100, (used / s.limitAmount) * 100));
+
+    const rows = s.cards.map(c => {
+      const u = this.cardTotals(c.id), left = c.target - u, done = left <= 0;
+      const p = Math.max(0, Math.min(100, (u / c.target) * 100));
+      return {
+        id: c.id, nickname: c.nickname, used: WON(u), target: WON(c.target),
+        left: done ? '목표 달성' : WON(left), leftColor: done ? GREEN : INK,
+        pct: p.toFixed(1), barColor: done ? GREEN : INK, dim: done ? 0.5 : 1,
+        status: done ? 'COMPLETE' : 'TRACKING', statusColor: done ? GREEN : MUTE,
+        cycle: '매월 ' + c.startDay + '일 시작 · 남은 ' + (28 - c.startDay + 4) + '일',
+        kw: c.kw, startDay: c.startDay, sortKey: done ? 1e12 : left,
+        open: go('inbox', { tab: 'all' }),
+        edit: () => this.setState({
+          screen: 'edit', editId: c.id, backTo: 'cards',
+          form: { nickname: c.nickname, target: c.target.toLocaleString('ko-KR'), keywords: c.kw, exclude: c.ex, startDay: c.startDay, dTarget: c.dTarget, dLimit: c.dLimit }
+        })
+      };
+    }).sort((a, b) => s.sort === 'left' ? a.sortKey - b.sortKey : a.nickname.localeCompare(b.nickname));
+
+    const filt = s.tab === 'pending' ? pending : s.tab === 'excluded' ? s.txs.filter(t => t.status === 'excluded') : s.txs;
+    const nameOf = id => (s.cards.find(c => c.id === id) || {}).nickname || '미분류';
+    const statusMeta = t => t.status === 'pending' ? { label: '확인 필요', color: accent }
+      : t.status === 'excluded' ? { label: '제외됨', color: MUTE }
+      : t.dir === 'cancel' ? { label: '취소 반영', color: GREEN } : { label: '자동 반영', color: INK };
+
+    const txRows = filt.map(t => {
+      const m = statusMeta(t);
+      return {
+        id: t.id, merchant: t.merchant, cardName: nameOf(t.cardId), time: t.at,
+        amount: (t.dir === 'cancel' ? '−' : '') + WON(t.amount),
+        amountColor: t.status === 'auto' ? (t.dir === 'cancel' ? GREEN : INK) : MUTE,
+        status: m.label, accent: m.color,
+        hasReason: !!t.reason && t.status !== 'auto', reason: t.reason || '',
+        open: () => this.setState({ screen: 'detail', sel: t.id, backTo: 'inbox', toast: null })
+      };
+    });
+
+    const tabDefs = [['pending', '확인 필요 ' + pending.length], ['all', '전체 ' + s.txs.length], ['excluded', '제외됨']];
+    const tabs = tabDefs.map(([k, label]) => ({
+      label: label, pick: () => this.setState({ tab: k }),
+      bg: s.tab === k ? INK : 'transparent', fg: s.tab === k ? '#F4F1E8' : '#6B6455', border: s.tab === k ? INK : LINE
+    }));
+
+    const t = s.txs.find(x => x.id === s.sel);
+    let d = null;
+    if (t) {
+      const m = statusMeta(t);
+      d = {
+        amount: (t.dir === 'cancel' ? '−' : '') + WON(t.amount), amountColor: t.dir === 'cancel' ? GREEN : INK,
+        merchant: t.merchant, time: t.at + ' · ' + (t.dir === 'cancel' ? '취소' : '승인'),
+        status: m.label, accent: m.color,
+        cardOptions: s.cards.map(c => ({
+          label: c.nickname, pick: () => { this.setState({ undoSnap: this.snap() }); this.patchTx(t.id, { cardId: c.id, status: t.status === 'pending' ? 'auto' : t.status }, '카드를 ' + c.nickname + '(으)로 이동'); this.say(c.nickname + '(으)로 이동했습니다', true); },
+          bg: t.cardId === c.id ? INK : 'transparent', fg: t.cardId === c.id ? '#F4F1E8' : '#3D382C', border: t.cardId === c.id ? INK : LINE
+        })),
+        targetBg: t.target ? INK : LINE, targetX: t.target ? 25 : 3,
+        limitBg: t.limit ? INK : LINE, limitX: t.limit ? 25 : 3,
+        toggleTarget: () => { this.setState({ undoSnap: this.snap() }); this.patchTx(t.id, { target: !t.target }, '목표 추적 ' + (t.target ? '제외' : '포함')); this.say('목표 추적 ' + (t.target ? '제외' : '포함') + '으로 변경', true); },
+        toggleLimit: () => { this.setState({ undoSnap: this.snap() }); this.patchTx(t.id, { limit: !t.limit }, '구매 추적 한도 ' + (t.limit ? '제외' : '포함')); this.say('한도 ' + (t.limit ? '제외' : '포함') + '으로 변경', true); },
+        evidence: [
+          { k: '매칭 키워드', v: t.cardId ? (s.cards.find(c => c.id === t.cardId) || {}).kw : '없음' },
+          { k: '파싱 신뢰도', v: t.conf.toFixed(2) },
+          { k: '파서 버전', v: 'v3.2 · KR-SMS' },
+          { k: 'fingerprint', v: 'a7f' + t.id + '…9c2' }
+        ],
+        log: t.log, logEmpty: t.log.length === 0,
+        primaryLabel: t.status === 'excluded' ? '제외 복원' : '집계 확정',
+        primary: () => {
+          this.setState({ undoSnap: this.snap() });
+          this.patchTx(t.id, { status: 'auto', reason: null }, t.status === 'excluded' ? '제외 복원' : '집계 확정');
+          this.say(t.status === 'excluded' ? '복원했습니다' : '합계에 반영했습니다', true);
+        },
+        secondaryLabel: '실적 제외',
+        secondary: () => { this.setState({ undoSnap: this.snap() }); this.patchTx(t.id, { status: 'excluded' }, '사용자가 제외 처리'); this.say('제외했습니다', true); }
+      };
+    }
+
+    const days = [1, 5, 10, 15, 20, 25, 28].map(dd => ({
+      d: dd, pick: () => this.setState(st => ({ form: Object.assign({}, st.form, { startDay: dd }) })),
+      bg: s.form.startDay === dd ? INK : 'transparent', fg: s.form.startDay === dd ? '#F4F1E8' : '#3D382C', border: s.form.startDay === dd ? INK : LINE
+    }));
+    const setF = k => e => {
+      let v = e.target.value;
+      if (k === 'target') {
+        const n = parseInt(v.replace(/[^0-9]/g, ''), 10);
+        v = isNaN(n) ? '' : n.toLocaleString('ko-KR');
+      }
+      this.setState(st => ({ form: Object.assign({}, st.form, { [k]: v }) }));
+    };
+
+    const nav = [['home', '홈'], ['inbox', '결과함'], ['cards', '카드'], ['settings', '설정']].map(([k, label]) => ({
+      label: label, go: go(k), mark: s.screen === k ? INK : 'transparent',
+      fg: s.screen === k ? INK : MUTE,
+      badge: k === 'inbox' && pending.length > 0, badgeText: String(pending.length)
+    }));
+
+    const receive = ambiguous => () => {
+      const n = s.seq + 1;
+      const pool = [['배달의민족', 23400, 'c1'], ['CU 논현', 4800, 'c3'], ['교보문고', 31500, 'c2'], ['카카오T', 12600, 'c1']];
+      const [merchant, amount, cardId] = pool[n % pool.length];
+      const tx = ambiguous
+        ? { id: 'n' + n, cardId: null, merchant: '미확인 가맹점', amount: 76500, at: '방금', dir: 'approval', status: 'pending', target: true, limit: true, conf: 0.58, reason: '키워드가 두 카드와 일치해 자동 반영하지 않았습니다', log: [] }
+        : { id: 'n' + n, cardId: cardId, merchant: merchant, amount: amount, at: '방금', dir: 'approval', status: 'auto', target: true, limit: true, conf: 0.98, log: [] };
+      this.setState(st => ({ txs: [tx].concat(st.txs), seq: n, screen: st.screen === 'onboard' ? 'home' : st.screen }));
+      this.say(ambiguous ? '확인 필요 1건이 결과함에 저장되었습니다' : merchant + ' ' + WON(amount) + ' 자동 반영', false);
+    };
+
+    return {
+      isOnboard: s.screen === 'onboard', isHome: s.screen === 'home', isInbox: s.screen === 'inbox',
+      isDetail: s.screen === 'detail' && !!d, isCards: s.screen === 'cards', isEdit: s.screen === 'edit',
+      isSettings: s.screen === 'settings', showNav: s.screen !== 'onboard',
+      daysLeft: 12, limitUsed: WON(used), limitTotal: WON(s.limitAmount), limitLeft: WON(s.limitAmount - used),
+      limitPct: pct.toFixed(1), limitPctLabel: Math.round(pct) + '% 사용',
+      hasPending: pending.length > 0, pendingCount: pending.length,
+      sortLabel: s.sort === 'left' ? '남은 금액순' : '이름순',
+      toggleSort: () => this.setState({ sort: s.sort === 'left' ? 'name' : 'left' }),
+      cardRows: rows, cardCount: s.cards.length,
+      tabs: tabs, txRows: txRows, txEmpty: txRows.length === 0,
+      tabTitle: s.tab === 'pending' ? '확인 필요' : s.tab === 'excluded' ? '제외된 거래' : '모든 거래',
+      d: d, form: Object.assign({}, s.form, {
+        targetBg: s.form.dTarget ? INK : LINE, targetX: s.form.dTarget ? 25 : 3,
+        limitBg: s.form.dLimit ? INK : LINE, limitX: s.form.dLimit ? 25 : 3
+      }),
+      dayOptions: days, setNick: setF('nickname'), setTarget: setF('target'), setKw: setF('keywords'), setEx: setF('exclude'),
+      toggleFormTarget: () => this.setState(st => ({ form: Object.assign({}, st.form, { dTarget: !st.form.dTarget }) })),
+      toggleFormLimit: () => this.setState(st => ({ form: Object.assign({}, st.form, { dLimit: !st.form.dLimit }) })),
+      editTitle: s.editId ? '카드 편집' : '카드 추가',
+      saveLabel: s.editId ? '변경 저장' : '카드 저장',
+      newCard: () => this.setState({ screen: 'edit', editId: null, backTo: 'cards', form: { nickname: '', target: '', keywords: '', exclude: '', startDay: 1, dTarget: true, dLimit: true } }),
+      saveCard: () => {
+        const f = s.form, target = parseInt(String(f.target).replace(/[^0-9]/g, ''), 10) || 0;
+        if (!f.nickname.trim() || !target || !f.keywords.trim()) { this.say('별명·목표·인식 키워드는 필수입니다', false); return; }
+        const card = { id: s.editId || 'c' + (s.seq + 1), nickname: f.nickname.trim(), target: target, startDay: f.startDay, kw: f.keywords.trim(), ex: f.exclude.trim(), dTarget: f.dTarget, dLimit: f.dLimit };
+        this.setState(st => ({
+          cards: st.editId ? st.cards.map(c => c.id === st.editId ? card : c) : st.cards.concat([card]),
+          seq: st.seq + 1, screen: 'cards'
+        }));
+        this.say(s.editId ? '카드를 수정했습니다' : card.nickname + ' 카드를 추가했습니다', false);
+      },
+      limitInput: s.limitInput,
+      setLimit: e => {
+        const raw = e.target.value, n = parseInt(raw.replace(/[^0-9]/g, ''), 10);
+        this.setState({ limitInput: raw, limitAmount: n > 0 ? n : 1 });
+      },
+      smsOn: s.smsOn, smsBg: s.smsOn ? INK : LINE, smsX: s.smsOn ? 25 : 3,
+      smsStateLabel: s.smsOn ? '새 결제 SMS를 기기 안에서 자동 반영합니다' : '제한 모드 — 열람·수동 보정만 가능합니다',
+      toggleSms: () => { this.setState({ smsOn: !s.smsOn }); this.say(s.smsOn ? '권한 해제 — 새 SMS 접근을 중단했습니다' : 'SMS 자동 집계를 켰습니다', false); },
+      wipe: () => { this.setState({ txs: [], cards: [], undoSnap: this.snap() }); this.say('로컬 데이터를 모두 삭제했습니다', true); },
+      grant: () => { this.setState({ smsOn: true, screen: 'home' }); this.say('SMS 자동 집계를 켰습니다', false); },
+      deny: () => { this.setState({ smsOn: false, screen: 'home' }); this.say('제한 모드로 시작합니다 — 수동 보정만 가능합니다', false); },
+      back: () => this.setState({ screen: s.backTo, toast: null }),
+      goInbox: go('inbox', { tab: 'pending' }), goSettings: go('settings'),
+      navItems: nav,
+      hasToast: !!s.toast, toastText: s.toast || '', canUndo: !!s.undoSnap,
+      toastBottom: s.screen === 'onboard' ? 26 : 78,
+      undo: () => { const u = s.undoSnap; if (u) this.setState({ cards: u.cards, txs: u.txs, limitAmount: u.limitAmount, toast: '되돌렸습니다', undoSnap: null }); },
+      simClear: receive(false), simAmbig: receive(true), reset: () => this.setState(this.seed())
+    };
+  }
+}
+</script>
+</body>
+</html>
