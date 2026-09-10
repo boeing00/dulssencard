@@ -149,8 +149,16 @@ object PaymentParser {
 
         val haystack = listOfNotNull(raw.title, body).joinToString("\n")
 
-        val issuer = IssuerRegistry.detect(raw.title, body)
-            ?: raw.senderKey.let { IssuerRegistry.byPackage(it) }
+        // 카드사 앱 푸시는 **패키지명이 가장 강한 단서**다. 본문 키워드를 먼저 보면
+        // 현대카드 앱이 띄운 `하나로마트 성수점 12,000원 승인` 이 가맹점의 '하나' 때문에
+        // 하나카드 거래로 둔갑한다 — 본문에 '현대'가 없으니 길이 규칙에서 '하나'가 이긴다.
+        // 문자·알림톡은 전달자(문자 앱·카카오톡)가 발신자라 패키지에 카드사 정보가 없으므로
+        // 지금까지처럼 본문·제목을 먼저 본다.
+        val issuer = if (raw.source == TxSource.PUSH) {
+            IssuerRegistry.byPackage(raw.senderKey) ?: IssuerRegistry.detect(raw.title, body)
+        } else {
+            IssuerRegistry.detect(raw.title, body) ?: IssuerRegistry.byPackage(raw.senderKey)
+        }
         val declaredDirection = detectDirection(haystack)
         val strongSignal = STRONG_DIRECTION_WORDS.any { haystack.contains(it) }
 
@@ -407,7 +415,12 @@ object PaymentParser {
      * → 남는 조각은 `이마트 성수`.
      */
     private fun extractMerchantFromFlatText(body: String, issuerKeywords: List<String>): String? {
-        val cut = " "
+        // 구분자는 **NUL** 이다. 공백을 쓰면 안 된다 — 아래에서 `split(cut)` 을 하는데,
+        // 공백으로 자르면 `이마트 성수` 가 두 조각으로 쪼개져 가맹점이 반토막 난다.
+        // NUL 은 카드사 문구에 나올 수 없어 안전한 경계 표시가 된다.
+        // 다만 리터럴 NUL 을 소스에 그대로 박으면 git 이 이 파일을 바이너리로 보아
+        // diff 를 못 보여 주고, 포매터가 공백으로 바꿔 놓으면 위 증상이 조용히 살아난다.
+        val cut = "\u0000"
         var text = body
         listOf(WON_AMOUNT, FOREIGN_AMOUNT, DATE_TIME, CARD_SUFFIX, MASKED_NAME, BRACKETED)
             .forEach { text = it.replace(text, cut) }

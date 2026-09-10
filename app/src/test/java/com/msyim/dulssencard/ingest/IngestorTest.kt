@@ -341,4 +341,113 @@ class IngestorTest {
         )
         assertEquals(Ingestor.Outcome.NotAPayment, ingest(raw))
     }
+
+    // ------------------------------------------------------------ 취소가 물려받는 것
+
+    /** 같은 결제의 취소 문자. 금액과 가맹점을 바꿔 가며 쓴다. */
+    private fun cancelSms(
+        amount: String = "84,300",
+        merchant: String = "이마트 성수",
+        receivedAt: Long = at(2026, 9, 6, 20, 11),
+    ) = RawMessage(
+        source = TxSource.SMS,
+        senderKey = "com.google.android.apps.messaging",
+        title = null,
+        body = """
+            [Web발신]
+            신한카드(1234)취소 홍*동
+            ${amount}원
+            09/06 20:10
+            $merchant
+        """.trimIndent(),
+        receivedAt = receivedAt,
+    )
+
+    @Test
+    fun `취소는 원 승인 거래의 포함 설정을 물려받는다`() = runTest {
+        // 사용자가 원 승인을 '목표 추적 제외'로 꺼 뒀다. 그 취소가 카드 기본값(포함)으로
+        // 들어오면 **더한 적 없는 돈을 빼서** 카드 누적이 실제보다 작아진다.
+        val approval = inserted(ingest(smsApproval())).copy(
+            countsTowardTarget = false,
+            countsTowardPurchaseLimit = false,
+        )
+
+        val txn = inserted(ingest(cancelSms(), existing = listOf(approval)))
+
+        assertEquals(approval.id, txn.relatedTransactionId)
+        assertEquals(false, txn.countsTowardTarget)
+        assertEquals(false, txn.countsTowardPurchaseLimit)
+    }
+
+    @Test
+    fun `원 승인이 포함이면 취소도 포함으로 들어온다`() = runTest {
+        val approval = inserted(ingest(smsApproval()))
+
+        val txn = inserted(ingest(cancelSms(), existing = listOf(approval)))
+
+        assertEquals(true, txn.countsTowardTarget)
+        assertEquals(true, txn.countsTowardPurchaseLimit)
+    }
+
+    @Test
+    fun `취소 문구가 어느 카드와도 안 맞으면 원 승인 거래의 카드로 붙인다`() = runTest {
+        // 카드를 못 찾으면 취소가 확인 필요로 쌓이고, 그동안 누적은 부풀어 있는 채로 남는다.
+        // 원 승인 거래를 이미 찾았다면 카드는 그 거래가 알고 있다.
+        val approval = inserted(ingest(smsApproval()))
+        assertEquals(shinhan.id, approval.cardId)
+
+        val txn = inserted(ingest(cancelSms(), cards = listOf(hyundai), existing = listOf(approval)))
+
+        assertEquals(shinhan.id, txn.cardId)
+        assertEquals(TxStatus.AUTO, txn.status)
+        assertNull(txn.pendingReason)
+    }
+
+    @Test
+    fun `카드가 맞은 취소는 그 카드를 그대로 쓴다`() = runTest {
+        val approval = inserted(ingest(smsApproval()))
+
+        val txn = inserted(ingest(cancelSms(), existing = listOf(approval)))
+
+        assertEquals(shinhan.id, txn.cardId)
+    }
+
+    // ------------------------------------------------------------ 캡처 재반입
+
+    /** 캡처 이미지 한 덩어리. 수신 시각은 '결제 시각'이 아니라 '불러온 시각'이다. */
+    private fun imageBlock(receivedAt: Long) = RawMessage(
+        source = TxSource.IMAGE,
+        senderKey = "image-ocr",
+        title = null,
+        body = """
+            신한카드(1234)승인 홍*동
+            84,300원 일시불
+            09/06 19:42
+            이마트 성수
+        """.trimIndent(),
+        receivedAt = receivedAt,
+    )
+
+    @Test
+    fun `같은 캡처를 하루 뒤에 다시 불러와도 중복으로 판정한다`() = runTest {
+        // 이미지의 수신 시각은 결제 시각과 무관하다. 시각 창(15분)을 그대로 적용하면
+        // 같은 결제가 매번 새 행으로 들어오고, 사용자가 확정하는 순간 이중 집계가 된다.
+        val first = inserted(ingest(imageBlock(at(2026, 9, 6, 21, 0))))
+
+        val again = ingest(imageBlock(at(2026, 9, 7, 21, 0)), existing = listOf(first))
+
+        assertTrue("expected Duplicate but was $again", again is Ingestor.Outcome.Duplicate)
+    }
+
+    @Test
+    fun `캡처라도 가맹점이 다르면 별개 결제로 남긴다`() = runTest {
+        val first = inserted(ingest(imageBlock(at(2026, 9, 6, 21, 0))))
+        val otherShop = imageBlock(at(2026, 9, 6, 21, 0)).copy(
+            body = imageBlock(0L).body.replace("이마트 성수", "롯데백화점 잠실"),
+        )
+
+        val second = ingest(otherShop, existing = listOf(first))
+
+        assertTrue("expected Insert but was $second", second is Ingestor.Outcome.Insert)
+    }
 }
