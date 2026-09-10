@@ -293,4 +293,28 @@ class BankAndForeignTest {
         val txns = listOf(foreignTxn("USD", 50.0, occurredAt = at(2026, 8, 20, 12, 0)))
         assertTrue(Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now).isEmpty())
     }
+
+    @Test
+    fun `취소가 승인보다 크면 음수로라도 보여 준다`() {
+        // 예전에는 `total > 0` 으로 걸러서 통화가 통째로 사라졌다.
+        // "해외에서 쓴 게 어디 갔지"를 막으려던 의도와 정반대 동작이다.
+        val txns = listOf(
+            foreignTxn("USD", 20.0),
+            foreignTxn("USD", 50.0, direction = TxDirection.CANCEL),
+        )
+
+        val spend = Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now)
+
+        assertEquals(-30.0, spend.single().total, 0.001)
+    }
+
+    @Test
+    fun `승인과 취소가 정확히 상쇄되면 줄을 지운다`() {
+        val txns = listOf(
+            foreignTxn("USD", 20.0),
+            foreignTxn("USD", 20.0, direction = TxDirection.CANCEL),
+        )
+
+        assertTrue(Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now).isEmpty())
+    }
 }

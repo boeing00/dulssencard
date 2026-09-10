@@ -49,7 +49,12 @@ class DulSsenRepository private constructor(private val context: Context) {
             cards = cards,
             existingByFingerprint = { fingerprint -> db.txnDao().byFingerprint(fingerprint) },
             cancelOriginFinder = { amount, issuerKey, before ->
-                db.txnDao().findCancelOrigin(amount, issuerKey, before)
+                db.txnDao().findCancelOrigin(
+                    amount = amount,
+                    issuerKey = issuerKey,
+                    before = before,
+                    notBefore = before - CANCEL_LOOKBACK_MILLIS,
+                )
             },
         )
         if (outcome is Ingestor.Outcome.Insert) {
@@ -358,6 +363,13 @@ class DulSsenRepository private constructor(private val context: Context) {
     )
 
     companion object {
+        /**
+         * 취소를 원 승인 거래에 연결할 때 거슬러 올라가는 최대 기간.
+         * 카드사 취소는 결제 후 몇 달 안에 일어나므로 90일이면 충분하고,
+         * 이보다 넓히면 "같은 금액 다른 결제"에 잘못 물릴 확률만 커진다.
+         */
+        const val CANCEL_LOOKBACK_MILLIS = 90L * 24 * 60 * 60 * 1000
+
         @Volatile
         private var instance: DulSsenRepository? = null
 

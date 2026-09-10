@@ -3,6 +3,7 @@ package com.msyim.dulssencard.ingest
 import com.msyim.dulssencard.data.model.Card
 import com.msyim.dulssencard.data.model.PendingReason
 import com.msyim.dulssencard.data.model.TxDirection
+import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import java.util.UUID
@@ -57,7 +58,14 @@ object Ingestor {
             // 지문이 같아도 가맹점이 명백히 다르면 별개 결제다.
             // (같은 카드사에서 같은 분에 같은 금액을 다른 가게에서 긁은 경우)
             val differentShop = Fingerprint.merchantsConflict(existing.merchant, parsed.merchant)
-            val closeInTime = abs(existing.receivedAt - raw.receivedAt) <= CROSS_SOURCE_WINDOW_MILLIS
+            // 캡처 이미지의 수신 시각은 '불러온 시각'이라 결제 시각과 아무 상관이 없다.
+            // 어제 넣은 캡처를 오늘 다시 넣으면 시각 차만 벌어져서 같은 결제가 매번
+            // 새 행으로 들어오고, 결과 문구는 "N건을 불러왔습니다"라고 알린다.
+            // 사용자가 확인 결과함에서 확정하면 그대로 이중 집계다.
+            // 그래서 이미지 경로는 시각 창을 보지 않고 지문 일치만으로 중복을 판정한다
+            // (목록 불러오기 경로가 이미 그렇게 동작한다 — 두 경로를 같게 맞춘다).
+            val closeInTime = raw.source == TxSource.IMAGE ||
+                abs(existing.receivedAt - raw.receivedAt) <= CROSS_SOURCE_WINDOW_MILLIS
 
             if (!differentShop && closeInTime) {
                 // 같은 결제가 다른 경로로(문자 + 푸시) 또는 같은 경로로 재전달되어 또 온 것이다.
@@ -82,19 +90,25 @@ object Ingestor {
             }
         } ?: false
 
-        val cardId = matches.singleOrNull()?.id
         val defaultsCard = matches.singleOrNull()
 
-        var relatedTransactionId: String? = null
-        if (parsed.direction == TxDirection.CANCEL) {
-            val before = parsed.occurredAt ?: raw.receivedAt
-            relatedTransactionId =
-                cancelOriginFinder(parsed.amount, parsed.issuerKey, before)?.id
+        // 취소는 원 승인 거래를 먼저 찾는다. 찾았으면 id 뿐 아니라 **카드와 포함 설정까지**
+        // 물려받는다. 카드 기본값을 쓰면, 사용자가 원 거래를 '목표 제외'로 꺼 뒀을 때
+        // 더한 적 없는 돈을 빼서 합계가 실제보다 작아진다. 카드도 마찬가지로,
+        // 취소 문구가 어느 카드와도 안 맞으면 엉뚱한 곳에서 빠지거나 아예 안 빠진다.
+        val cancelOrigin: Txn? = if (parsed.direction == TxDirection.CANCEL) {
+            cancelOriginFinder(parsed.amount, parsed.issuerKey, parsed.occurredAt ?: raw.receivedAt)
+        } else {
+            null
         }
+        val relatedTransactionId: String? = cancelOrigin?.id
+        val cardId = defaultsCard?.id ?: cancelOrigin?.cardId
 
         val reason = firstBlockingReason(
             parsed = parsed,
             matchCount = matches.size,
+            // 원 승인 거래에 카드가 붙어 있으면 이 취소의 카드도 이미 정해진 것이다.
+            cardResolvedByCancelOrigin = matches.isEmpty() && cancelOrigin?.cardId != null,
             excluded = excluded,
             duplicateSuspected = duplicateSuspected,
             cancelUnlinked = parsed.direction == TxDirection.CANCEL && relatedTransactionId == null,
@@ -106,7 +120,7 @@ object Ingestor {
             // 캡처 이미지는 무엇이든 담을 수 있다(다른 앱 화면, 문서, 은행 거래).
             // 실기기에서 무관한 문서의 숫자가 1억원짜리 거래로 들어온 적이 있어,
             // 이미지 출처는 사람이 눈으로 확인하기 전까지 합계에 넣지 않는다.
-            raw.source == com.msyim.dulssencard.data.model.TxSource.IMAGE -> TxStatus.PENDING
+            raw.source == TxSource.IMAGE -> TxStatus.PENDING
             else -> TxStatus.AUTO
         }
 
@@ -124,8 +138,11 @@ object Ingestor {
                 status = status,
                 source = raw.source,
                 merchant = parsed.merchant,
-                countsTowardTarget = defaultsCard?.defaultCountsTowardTarget ?: true,
-                countsTowardPurchaseLimit = defaultsCard?.defaultCountsTowardPurchaseLimit ?: true,
+                // 취소는 원 승인 거래의 포함 설정을 그대로 물려받는다(위 주석 참고).
+                countsTowardTarget = cancelOrigin?.countsTowardTarget
+                    ?: defaultsCard?.defaultCountsTowardTarget ?: true,
+                countsTowardPurchaseLimit = cancelOrigin?.countsTowardPurchaseLimit
+                    ?: defaultsCard?.defaultCountsTowardPurchaseLimit ?: true,
                 parserVersion = PaymentParser.VERSION,
                 confidence = parsed.confidence,
                 messageFingerprint = fingerprint,
@@ -146,6 +163,7 @@ object Ingestor {
     private fun firstBlockingReason(
         parsed: ParsedPayment,
         matchCount: Int,
+        cardResolvedByCancelOrigin: Boolean,
         excluded: Boolean,
         duplicateSuspected: Boolean,
         cancelUnlinked: Boolean,
@@ -153,7 +171,7 @@ object Ingestor {
         excluded -> PendingReason.EXCLUDE_KEYWORD
         duplicateSuspected -> PendingReason.DUPLICATE_SUSPECTED
         matchCount > 1 -> PendingReason.MULTIPLE_CARD_MATCH
-        matchCount == 0 -> PendingReason.NO_CARD_MATCH
+        matchCount == 0 && !cardResolvedByCancelOrigin -> PendingReason.NO_CARD_MATCH
         // 해외·할부를 금액/시각 검사보다 먼저 본다. 해외 승인은 원화 금액이 없는 게 정상이라
         // "금액 0원"이라고 알리면 사용자가 원인을 오해한다.
         parsed.overseas -> PendingReason.FOREIGN_CURRENCY

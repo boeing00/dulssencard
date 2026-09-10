@@ -483,4 +483,37 @@ class PaymentParserTest {
         // 위 규칙이 느슨해 보여도, 결제 여부 판정은 금액·시각·방향어가 따로 막는다.
         assertNull(PaymentParser.parse(sms("[Web발신] 신한카드 및 현대카드 공동 이벤트 안내입니다")))
     }
+
+    // ------------------------------------------------------------ 카드사 판정 우선순위
+
+    @Test
+    fun `카드사 앱 푸시는 가맹점 이름보다 패키지명을 믿는다`() {
+        // 현대카드 앱이 띄운 푸시인데 본문에 '현대'가 없고 가맹점에 '하나'가 들어 있다.
+        // 본문 키워드를 먼저 보면 길이 규칙에서 '하나'가 이겨 하나카드 거래로 둔갑한다.
+        val parsed = PaymentParser.parse(
+            push("com.hyundaicard.appcard", "결제 알림", "승인 12,000원 09/06 12:30 하나로마트 성수점"),
+        )
+
+        assertNotNull(parsed)
+        assertEquals("HYUNDAI", parsed!!.issuerKey)
+    }
+
+    @Test
+    fun `패키지를 모르는 푸시는 본문으로 카드사를 찾는다`() {
+        val parsed = PaymentParser.parse(
+            push("com.unknown.wallet", null, "신한카드(1234)승인 12,000원 09/06 12:30 이마트 성수"),
+        )
+
+        assertNotNull(parsed)
+        assertEquals("SHINHAN", parsed!!.issuerKey)
+    }
+
+    @Test
+    fun `문자는 지금까지처럼 본문으로 카드사를 찾는다`() {
+        // 문자 앱·카카오톡은 전달자라 패키지에 카드사 정보가 없다. 우선순위가 뒤바뀌면 안 된다.
+        val parsed = PaymentParser.parse(sms("신한카드(1234)승인 12,000원 09/06 12:30 이마트 성수"))
+
+        assertNotNull(parsed)
+        assertEquals("SHINHAN", parsed!!.issuerKey)
+    }
 }

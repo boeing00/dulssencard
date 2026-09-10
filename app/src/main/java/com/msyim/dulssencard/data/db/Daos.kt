@@ -53,21 +53,37 @@ interface TxnDao {
     /**
      * 취소 거래를 원 승인 거래에 연결할 후보.
      * 같은 카드사·같은 금액·승인 방향이고, 취소 시각보다 앞선 것 중 가장 최근 것을 고른다.
-     * 이미 다른 취소가 물린 거래는 [relatedTransactionId] 역참조로 걸러 낸다.
+     * 이미 다른 취소가 물린 거래는 [Txn.relatedTransactionId] 역참조로 걸러 낸다.
+     *
+     * 좁혀 둔 조건 셋 — 셋 다 없으면 합계가 조용히 어긋난다:
+     *
+     *  - **`status = 'AUTO'`**: 합계에 들어간 거래만 원본으로 삼는다. 확인 필요·제외된 거래에
+     *    취소가 물면, 더한 적 없는 돈을 빼서 누적이 실제보다 작아진다. 원본이 아직 확인 필요면
+     *    이 취소도 `UNLINKED_CANCEL` 로 남아 둘을 함께 처리하게 되는데, 그게 맞는 동작이다.
+     *  - **[notBefore] 하한**: 기간 제한이 없으면 반년 전 같은 금액 거래에 물린다.
+     *  - **카드사**: 예전에는 `issuerKey IS NULL OR` 가 끼어 있어서, 카드사를 판정하지 못한
+     *    거래가 **아무 카드사의 취소와도** 맞아떨어졌다.
      */
     @Query(
         """
         SELECT * FROM txns
         WHERE direction = 'APPROVAL'
+          AND status = 'AUTO'
           AND amount = :amount
-          AND (:issuerKey IS NULL OR issuerKey IS NULL OR issuerKey = :issuerKey)
+          AND (:issuerKey IS NULL OR issuerKey = :issuerKey)
           AND COALESCE(occurredAt, receivedAt) <= :before
+          AND COALESCE(occurredAt, receivedAt) >= :notBefore
           AND id NOT IN (SELECT relatedTransactionId FROM txns WHERE relatedTransactionId IS NOT NULL)
         ORDER BY COALESCE(occurredAt, receivedAt) DESC
         LIMIT 1
         """,
     )
-    suspend fun findCancelOrigin(amount: Long, issuerKey: String?, before: Long): Txn?
+    suspend fun findCancelOrigin(
+        amount: Long,
+        issuerKey: String?,
+        before: Long,
+        notBefore: Long,
+    ): Txn?
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnoringDuplicates(txn: Txn): Long

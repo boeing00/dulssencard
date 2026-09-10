@@ -175,8 +175,10 @@ object Aggregator {
                     count = rows.size,
                 )
             }
-            .filter { it.total > 0.0 }
-            .sortedByDescending { it.total }
+            // 0 만 걸러 낸다. 예전에는 `> 0.0` 이라 취소가 승인보다 큰 통화가 통째로
+            // 사라졌는데, 그건 "해외에서 쓴 게 어디 갔지"를 막으려던 의도와 정반대다.
+            .filter { it.total != 0.0 }
+            .sortedByDescending { kotlin.math.abs(it.total) }
     }
 
     /**
