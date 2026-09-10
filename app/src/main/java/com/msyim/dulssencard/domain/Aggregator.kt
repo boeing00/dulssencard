@@ -182,6 +182,46 @@ object Aggregator {
     }
 
     /**
+     * 직전 주기의 마감 스냅샷.
+     *
+     * `cycle_snapshots` 테이블과 [com.msyim.dulssencard.data.model.CycleSnapshot] 은 처음부터
+     * 있었지만 **어디서도 쓰지 않았다.** 주기가 넘어가면 지난 주기 숫자가 그냥 사라졌다.
+     * 화면은 아직 없지만 기록은 지금 남겨야 한다 — 나중에 화면을 붙일 때 과거 값을
+     * 되살릴 방법이 없기 때문이다.
+     *
+     * 앱을 열 때마다 다시 계산해 덮어쓴다. 마감된 주기의 값은 더 바뀌지 않으므로 같은 값이
+     * 다시 쓰이고, 사용자가 지난 주기 거래를 뒤늦게 보정하면 그 결과가 반영된다.
+     *
+     * 카드마다 주기 시작일이 다를 수 있어, 카드 합계는 **그 카드의 직전 주기** 기준이다.
+     * 한 번에 한 주기만 남기므로, 한참 만에 앱을 열면 그 사이 주기들은 비어 있다.
+     */
+    fun closedCycleSnapshot(
+        cards: List<Card>,
+        txns: List<Txn>,
+        limitCycleStartDay: Int,
+        now: Instant = Instant.now(),
+    ): com.msyim.dulssencard.data.model.CycleSnapshot {
+        val current = Cycle.windowFor(limitCycleStartDay, now)
+        // 직전 주기 안의 한 순간. 이 시각으로 다시 계산하면 그 주기의 합계가 나온다.
+        val insidePrevious = Instant.ofEpochMilli(current.startMillis - 1)
+        val previous = Cycle.windowFor(limitCycleStartDay, insidePrevious)
+
+        return com.msyim.dulssencard.data.model.CycleSnapshot(
+            cycleKey = previous.key("limit"),
+            cardTotals = cards.joinToString("\n") { card ->
+                "${card.id}=${cardProgress(card, txns, insidePrevious).spent}"
+            },
+            purchaseLimitTotal = limitProgress(
+                limitAmount = 0L,
+                limitCycleStartDay = limitCycleStartDay,
+                txns = txns,
+                now = insidePrevious,
+            ).spent,
+            closedAt = current.startMillis,
+        )
+    }
+
+    /**
      * 홈 카드 리스트 정렬.
      * 완료된 카드는 언제나 하단으로 내린다(README: 완료 카드는 하단 이동 + 저대비).
      */

@@ -281,6 +281,20 @@ class DulSsenRepository private constructor(private val context: Context) {
         snapshot.settings.forEach { (key, value) -> db.settingDao().put(Setting(key, value)) }
     }
 
+    /**
+     * 직전 주기의 합계를 얼려 둔다. 앱을 열 때 한 번 부른다.
+     * 실패해도 앱 동작에는 지장이 없어야 하므로 호출자가 감싼다.
+     */
+    suspend fun recordClosedCycle(limitCycleStartDay: Int) {
+        db.cycleSnapshotDao().upsert(
+            com.msyim.dulssencard.domain.Aggregator.closedCycleSnapshot(
+                cards = db.cardDao().all(),
+                txns = db.txnDao().all(),
+                limitCycleStartDay = limitCycleStartDay,
+            ),
+        )
+    }
+
     // ---------------------------------------------------------------- 설정
 
     suspend fun putSetting(key: String, value: String) = db.settingDao().put(Setting(key, value))

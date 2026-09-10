@@ -185,4 +185,43 @@ class AggregatorTest {
         assertEquals("c2", sorted.first().card.id)
         assertEquals("c1", sorted.last().card.id)
     }
+
+    // ------------------------------------------------------------ 주기 마감 스냅샷
+
+    @Test
+    fun `직전 주기의 합계를 얼려 둔다`() {
+        // 9/7 에 앱을 열면 8월 주기(8/1~9/1)의 합계가 남아야 한다.
+        val txns = listOf(
+            txn(100_000, occurredAt = instant(2026, 8, 10).toEpochMilli()),
+            txn(50_000, occurredAt = instant(2026, 8, 20).toEpochMilli()),
+            // 이번 주기 거래는 아직 마감되지 않았으므로 들어가면 안 된다.
+            txn(999_000, occurredAt = instant(2026, 9, 5).toEpochMilli()),
+        )
+
+        val snapshot = Aggregator.closedCycleSnapshot(listOf(card), txns, 1, now)
+
+        assertEquals("limit:2026-08-01", snapshot.cycleKey)
+        assertEquals("c1=150000", snapshot.cardTotals)
+        assertEquals(150_000L, snapshot.purchaseLimitTotal)
+    }
+
+    @Test
+    fun `마감 스냅샷은 확인 필요 거래를 세지 않는다`() {
+        val txns = listOf(
+            txn(100_000, occurredAt = instant(2026, 8, 10).toEpochMilli()),
+            txn(70_000, status = TxStatus.PENDING, occurredAt = instant(2026, 8, 11).toEpochMilli()),
+        )
+
+        val snapshot = Aggregator.closedCycleSnapshot(listOf(card), txns, 1, now)
+
+        assertEquals(100_000L, snapshot.purchaseLimitTotal)
+    }
+
+    @Test
+    fun `카드가 없으면 빈 합계로 남는다`() {
+        val snapshot = Aggregator.closedCycleSnapshot(emptyList(), emptyList(), 1, now)
+
+        assertEquals("", snapshot.cardTotals)
+        assertEquals(0L, snapshot.purchaseLimitTotal)
+    }
 }

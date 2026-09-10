@@ -72,6 +72,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 마이그레이션 전체. 계측 테스트(`AppDatabaseMigrationTest`)가 이 목록을 그대로 검증한다.
+         * 새 마이그레이션을 더하면 여기에 넣고, 테스트에 케이스를 함께 추가한다.
+         */
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+
         @Volatile
         private var instance: AppDatabase? = null
 
@@ -94,7 +100,7 @@ abstract class AppDatabase : RoomDatabase() {
             val factory = SupportOpenHelperFactory(DbPassphrase.getOrCreate(context))
             return Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(*MIGRATIONS)
                 // 마이그레이션을 빠뜨린 채 출시하면 사용자 데이터가 조용히 날아간다.
                 // 스키마를 바꿀 때는 반드시 Migration 을 추가한다.
                 .build()
