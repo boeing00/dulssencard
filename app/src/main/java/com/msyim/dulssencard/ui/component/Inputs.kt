@@ -93,6 +93,24 @@ fun UnderlinedField(
 }
 
 /**
+ * 한 줄 안에 들어가는 링크형 버튼. [DsTextButton] 은 세로로 쌓는 보조 버튼이라 가로를 전부 차지한다 —
+ * 제목 옆에 두면 제목이 한 글자 폭으로 눌려 세로로 깨진다(에뮬레이터 검증에서 발견).
+ * 글자는 작아도 누르는 영역은 44dp 높이를 지킨다.
+ */
+@Composable
+fun InlineLink(label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .heightIn(min = Ds.minTouchTarget)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, style = DsType.link)
+    }
+}
+
+/**
  * 비밀번호 입력칸. **화면에 가린다.** 붙여넣기는 막지 않는다 — 비밀번호 관리자에서 긴 비밀번호를
  * 붙여 넣는 사용자를 막으면 오히려 짧은 비밀번호를 쓰게 만든다.
  */

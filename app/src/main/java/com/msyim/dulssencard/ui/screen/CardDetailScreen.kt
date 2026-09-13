@@ -30,7 +30,7 @@ import com.msyim.dulssencard.domain.Aggregator
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ui.component.AmountEditDialog
-import com.msyim.dulssencard.ui.component.DsTextButton
+import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.Footnote
 import com.msyim.dulssencard.ui.component.Hairline
 import com.msyim.dulssencard.ui.component.OutlineButton
@@ -68,7 +68,7 @@ fun CardDetailScreen(
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(card.nickname, style = DsType.h2, modifier = Modifier.weight(1f))
-                    DsTextButton("설정", onEditCard)
+                    InlineLink("카드 설정", onEditCard)
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(

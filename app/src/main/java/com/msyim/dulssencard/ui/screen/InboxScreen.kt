@@ -41,7 +41,7 @@ import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ui.InboxFilter
 import com.msyim.dulssencard.ui.InboxTab
 import com.msyim.dulssencard.ui.component.CardPickerDialog
-import com.msyim.dulssencard.ui.component.DsTextButton
+import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.Hairline
 import com.msyim.dulssencard.ui.component.SectionLabel
@@ -113,7 +113,7 @@ fun InboxScreen(
                         style = DsType.h2,
                         modifier = Modifier.weight(1f),
                     )
-                    DsTextButton("+ 직접 입력", onAddManual)
+                    InlineLink("+ 직접 입력", onAddManual)
                 }
             }
         }

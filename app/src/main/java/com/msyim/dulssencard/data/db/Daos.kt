@@ -174,11 +174,16 @@ interface SourceAppDao {
     /**
      * 알림을 띄운 적 있다는 사실만 남긴다. 이미 있는 행의 enabled 는 건드리지 않는다.
      * 알림 내용은 여기에 들어오지 않는다.
+     *
+     * **컬럼을 전부 적는다.** 직접 쓴 SQL 이라 Room 이 컬럼을 채워 주지 않는다. v5 에서 진단 컬럼을
+     * 더하고 여기를 안 고쳐, 새로 설치한 기기에서 처음 보는 앱이 알림을 띄울 때마다 NOT NULL 위반으로
+     * 앱이 죽었다(에뮬레이터 검증에서 발견). 컬럼을 더하면 여기도 고칠 것 — `SourceAppDaoTest` 가 잡는다.
      */
     @Query(
         """
-        INSERT INTO source_apps (packageName, label, issuerKey, enabled, lastSeenAt)
-        VALUES (:pkg, :label, :issuerKey, 0, :seenAt)
+        INSERT INTO source_apps
+            (packageName, label, issuerKey, enabled, lastSeenAt, lastPaymentAt, recognizedCount, failedCount, countsSince)
+        VALUES (:pkg, :label, :issuerKey, 0, :seenAt, 0, 0, 0, 0)
         ON CONFLICT(packageName) DO UPDATE SET lastSeenAt = :seenAt, label = :label
         """,
     )

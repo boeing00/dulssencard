@@ -1,5 +1,6 @@
 package com.msyim.dulssencard.data.model
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -140,6 +141,7 @@ data class Card(
      * 사용자가 마지막으로 이 카드 설정을 바꾼 시각.
      * 백업을 병합할 때 "더 최근에 바꾼 쪽"을 고르는 기준이다. 0 이면 모름(v5 이전 데이터).
      */
+    @ColumnInfo(defaultValue = "0")
     val updatedAt: Long = 0L,
 )
 
@@ -200,6 +202,7 @@ data class Txn(
      * 이 거래가 마지막으로 바뀐 시각(수집 또는 사용자 보정).
      * 백업을 병합할 때 같은 결제의 두 사본 중 최근 것을 고르는 기준이다. 0 이면 모름(v5 이전 데이터).
      */
+    @ColumnInfo(defaultValue = "0")
     val updatedAt: Long = 0L,
 ) {
     /** 합계에 더할 부호 있는 금액. 취소는 차감한다. */
@@ -237,15 +240,19 @@ data class SourceApp(
      * 이 앱의 알림에서 결제를 마지막으로 인식한 시각. 0 이면 아직 없음.
      * 홈의 "최근 수집" 표시와, 수집이 멈춘 것을 사용자가 스스로 알아채게 하는 데 쓴다.
      */
+    @ColumnInfo(defaultValue = "0")
     val lastPaymentAt: Long = 0L,
     /** [countsSince] 이후 결제로 인식한 알림 수(중복 포함). */
+    @ColumnInfo(defaultValue = "0")
     val recognizedCount: Int = 0,
     /**
      * [countsSince] 이후 결제처럼 보이는데 읽지 못한 알림 수.
      * 카드사가 문구를 바꾸면 여기가 먼저 올라간다. 알림 **내용**은 남기지 않고 개수만 센다.
      */
+    @ColumnInfo(defaultValue = "0")
     val failedCount: Int = 0,
     /** 위 두 카운터를 센 시작 시각. 일주일이 지나면 0부터 다시 센다. */
+    @ColumnInfo(defaultValue = "0")
     val countsSince: Long = 0L,
 )
 
@@ -256,6 +263,7 @@ data class Setting(
     @PrimaryKey val key: String,
     val value: String,
     /** 마지막으로 바꾼 시각. 백업 병합에서 최근 값을 고르는 기준이다. 0 이면 모름. */
+    @ColumnInfo(defaultValue = "0")
     val updatedAt: Long = 0L,
 )
 

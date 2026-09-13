@@ -145,10 +145,17 @@ class InitialAmountTest {
     }
 
     @Test
-    fun `기준 시각과 같은 순간의 거래는 이미 포함된 것으로 본다`() {
-        val stamp = at(2026, 9, 8, 15, 0)
-        val c = card(initialAmount = 320_000L, initialAmountAt = stamp)
-        assertEquals(320_000L, Aggregator.cardProgress(c, listOf(txn(16_000L, stamp)), now).spent)
+    fun `기준을 넣은 바로 그 분에 한 결제는 더한다`() {
+        // 회귀(에뮬레이터 검증): 초기 사용액을 15:00:30 에 저장하고 곧바로 결제했더니 알림 시각이
+        // 분 단위(15:00 = 15:00:00)라 '기준 이전'으로 판정돼 합계에 안 들어갔다.
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 9, 8, 15, 0) + 30_000L)
+        assertEquals(336_000L, Aggregator.cardProgress(c, listOf(txn(16_000L, at(2026, 9, 8, 15, 0))), now).spent)
+    }
+
+    @Test
+    fun `기준 직전 분의 결제는 초기 사용액에 들어 있다고 본다`() {
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 9, 8, 15, 0) + 30_000L)
+        assertEquals(320_000L, Aggregator.cardProgress(c, listOf(txn(16_000L, at(2026, 9, 8, 14, 59))), now).spent)
     }
 
     @Test

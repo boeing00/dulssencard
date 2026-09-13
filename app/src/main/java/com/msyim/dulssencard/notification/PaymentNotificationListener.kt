@@ -10,6 +10,7 @@ import com.msyim.dulssencard.data.Settings
 import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ingest.RawMessage
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,7 +39,14 @@ import kotlinx.coroutines.launch
  */
 class PaymentNotificationListener : NotificationListenerService() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * 알림 한 건을 처리하다 실패해도 **앱 프로세스를 죽이지 않는다.** 이 서비스는 모든 알림마다 불리므로,
+     * 처리되지 않은 예외 하나가 앱 전체(열려 있는 화면 포함)를 반복해서 죽인다.
+     * 실패 내용은 기록하지 않는다 — 예외 메시지에 알림 조각이 섞일 수 있다. 개수는 소스 진단이 센다.
+     */
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, _ -> },
+    )
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val packageName = sbn.packageName ?: return

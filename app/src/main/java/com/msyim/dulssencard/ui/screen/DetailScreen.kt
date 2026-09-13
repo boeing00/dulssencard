@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.height
@@ -40,7 +41,7 @@ import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ui.component.AmountEditDialog
 import com.msyim.dulssencard.ui.component.DestructiveButton
-import com.msyim.dulssencard.ui.component.DsTextButton
+import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.OutlineButton
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.DsToggle
@@ -135,7 +136,7 @@ fun DetailScreen(
                     )
                 }
                 Spacer(Modifier.height(6.dp))
-                DsTextButton("금액 정정", { correcting = true })
+                InlineLink("금액 정정", { correcting = true }, Modifier.offset(x = (-6).dp))
             }
             Hairline()
         }

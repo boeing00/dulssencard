@@ -107,7 +107,7 @@ abstract class AppDatabase : RoomDatabase() {
                         "`confidence` REAL NOT NULL, `messageFingerprint` TEXT NOT NULL, " +
                         "`relatedTransactionId` TEXT, `pendingReason` TEXT, `issuerKey` TEXT, " +
                         "`installment` INTEGER NOT NULL, `overseas` INTEGER NOT NULL, " +
-                        "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                        "`updatedAt` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
                 )
                 val shared = "id, cardId, occurredAt, occurredAtEstimated, receivedAt, amount, currency, " +
                     "direction, status, source, merchant, countsTowardTarget, countsTowardPurchaseLimit, " +
