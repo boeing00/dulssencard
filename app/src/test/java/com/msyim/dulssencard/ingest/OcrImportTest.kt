@@ -86,7 +86,7 @@ class OcrImportTest {
         2026년 9월 7일 월요일
         삼성카드
         알림톡 도착
-        삼성가족6839승인 이*희
+        삼성가족2468승인 홍*동
         54,000원 일시불
         09/07 11:04
         (주)한빛상사
@@ -175,21 +175,21 @@ class OcrImportTest {
             챗봇 채팅중
             삼성카드
             알림톡 도착
-            삼성3541승인 홍*동
+            삼성5678승인 홍*동
             208,000원 일시불
             09/03 06:43
-            룰루레몬애틀라티
-            누적2,611,550원
+            가을숲스포츠
+            누적1,876,500원
             이번달 이용내역 조회
             06:43
             2026년 9월 5일 토요일
             삼성카드
             알림톡 도착
-            삼성3541승인 홍*동
+            삼성5678승인 홍*동
             7,890원 일시불
             09/05 10:00
-            쿠팡(와우멤버십)
-            누적2,672,071원
+            한빛몰(프리미엄)
+            누적1,884,390원
             이번달 이용내역 조회
             10:00
         """.trimIndent()
@@ -200,9 +200,9 @@ class OcrImportTest {
         val first = inserted(ingest(blocks[0]))
         val second = inserted(ingest(blocks[1], existing = listOf(first)))
         assertEquals(208_000L, first.amount)
-        assertEquals("룰루레몬애틀라티", first.merchant)
+        assertEquals("가을숲스포츠", first.merchant)
         assertEquals(7_890L, second.amount)
-        assertEquals("쿠팡(와우멤버십)", second.merchant)
+        assertEquals("한빛몰(프리미엄)", second.merchant)
     }
 
     // ------------------------------------------------------------ 엉뚱한 캡처

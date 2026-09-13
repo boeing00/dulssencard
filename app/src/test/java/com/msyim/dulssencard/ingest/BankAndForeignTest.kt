@@ -89,7 +89,7 @@ class BankAndForeignTest {
 
     @Test
     fun `환전은 카드사 이름이 있어도 결제가 아니다`() {
-        // 회귀: 실기기에서 은행 앱 캡처의 `환전주머니 6,696,200원` 이
+        // 회귀: 실기기에서 은행 앱 캡처의 `환전주머니 5,000,000원` 이
         // 우리카드 결제로 **자동 반영**됐다. 같은 필터가 목록 파서에만 있었기 때문이다.
         val parsed = PaymentParser.parse(
             RawMessage(
@@ -99,7 +99,7 @@ class BankAndForeignTest {
                 body = """
                     우리카드
                     환전주머니 자동
-                    6,696,200원
+                    5,000,000원
                     09/08 11:00
                 """.trimIndent(),
                 receivedAt = at(2026, 9, 8, 11, 1),

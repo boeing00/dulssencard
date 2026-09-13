@@ -30,7 +30,6 @@ data class ParsedPayment(
     val direction: TxDirection,
     val amount: Long,
     val currency: String,
-    /** 해외 승인의 외화 금액. 원화 환산은 하지 않는다(환율을 알 방법이 없다). */
     /** 외화 금액, 최소 통화 단위. [com.msyim.dulssencard.domain.ForeignMoney] 참고. */
     val foreignAmountMinor: Long?,
     val occurredAt: Long?,
@@ -93,7 +92,7 @@ object PaymentParser {
 
     /**
      * 카드 뒷 4자리. 카드사마다 표기가 갈린다:
-     * `우리(4321)승인` 처럼 괄호로 감싸거나, `삼성가족6839승인` 처럼 그냥 붙여 쓴다.
+     * `우리(4321)승인` 처럼 괄호로 감싸거나, `삼성가족2468승인` 처럼 그냥 붙여 쓴다.
      */
     private val CARD_SUFFIX = Regex("""[(\[](\d{4})[)\]]|(\d{4})\s*(?:승인|취소)""")
 
@@ -120,7 +119,7 @@ object PaymentParser {
     /**
      * **카드 결제가 아닌** 은행 거래.
      *
-     * 실기기에서 은행 앱 캡처를 넣었더니 `환전주머니 6,696,200원` 이 우리카드 결제로
+     * 실기기에서 은행 앱 캡처를 넣었더니 `환전주머니 5,000,000원` 이 우리카드 결제로
      * **자동 반영**됐다. 같은 필터가 [LedgerScreenParser] 에만 있었고, 통지로 인식되는
      * 경로는 그대로 통과시켰기 때문이다. 카드 실적이 계좌 이체액만큼 부풀어 오른다.
      *
@@ -429,7 +428,7 @@ object PaymentParser {
      * → 남는 조각은 `이마트 성수`.
      */
     private fun extractMerchantFromFlatText(body: String, issuerKeywords: List<String>): String? {
-        val cut = " "
+        val cut = "\u0000"
         var text = body
         listOf(WON_AMOUNT, FOREIGN_AMOUNT, DATE_TIME, CARD_SUFFIX, MASKED_NAME, BRACKETED)
             .forEach { text = it.replace(text, cut) }

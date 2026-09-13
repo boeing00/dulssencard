@@ -1,0 +1,20 @@
+source: KAKAO
+sender: com.kakao.talk
+title: 우리카드
+receivedAt: 2026-09-07T21:19
+expect.issuer: WOORI
+expect.direction: APPROVAL
+expect.amount: 16000
+expect.occurredAt: 2026-09-07T21:18
+expect.merchant: 푸른들컨트리클럽　주식
+expect.cardSuffix: 4321
+note: 전각 공백이 낀 가맹점, 누적 실적 줄, 가맹점보다 긴 하단 마케팅 문구
+---
+[우리카드 이용 안내]
+우리(4321)승인
+홍*동님
+16,000원 일시불
+09/07 21:18
+푸른들컨트리클럽　주식
+누적1,234,567원
+채널 추가하고 이 채널의 마케팅 메시지 등을 카카오톡으로 받기

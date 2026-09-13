@@ -1,0 +1,16 @@
+source: KAKAO
+sender: com.kakao.talk
+title: 삼성카드
+receivedAt: 2026-09-07T11:05
+expect.issuer: SAMSUNG
+expect.direction: APPROVAL
+expect.amount: 54000
+expect.occurredAt: 2026-09-07T11:04
+expect.merchant: (주)한빛상사
+expect.cardSuffix: 2468
+note: 괄호 없이 붙여 쓴 카드 뒷자리(삼성가족NNNN승인), (주) 로 시작하는 상호
+---
+삼성가족2468승인 홍*동
+54,000원 일시불
+09/07 11:04
+(주)한빛상사

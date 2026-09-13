@@ -324,12 +324,12 @@ class PaymentParserTest {
 
     @Test
     fun `삼성카드 알림톡을 읽는다`() {
-        // 함정: 괄호 없는 카드 뒷자리(삼성가족6839승인), (주) 로 시작하는 상호.
+        // 함정: 괄호 없는 카드 뒷자리(삼성가족2468승인), (주) 로 시작하는 상호.
         val parsed = PaymentParser.parse(
             kakao(
                 title = "삼성카드",
                 body = """
-                    삼성가족6839승인 이*희
+                    삼성가족2468승인 홍*동
                     54,000원 일시불
                     09/07 11:04
                     (주)한빛상사
@@ -341,7 +341,7 @@ class PaymentParserTest {
         assertEquals("SAMSUNG", parsed.issuerKey)
         assertEquals(54_000L, parsed.amount)
         assertEquals(at(2026, 9, 7, 11, 4), parsed.occurredAt)
-        assertEquals("6839", parsed.cardSuffix)
+        assertEquals("2468", parsed.cardSuffix)
         // 회귀: trim('(' , ')') 로 앞 괄호만 벗겨 "주)한빛상사" 가 되던 버그.
         assertEquals("(주)한빛상사", parsed.merchant)
     }
@@ -370,7 +370,7 @@ class PaymentParserTest {
         val parsed = PaymentParser.parse(
             kakao(
                 title = "삼성카드",
-                body = "삼성가족6839승인 이*희 54,000원 일시불 09/07 11:04 (주)한빛상사",
+                body = "삼성가족2468승인 홍*동 54,000원 일시불 09/07 11:04 (주)한빛상사",
             ),
         )
         assertEquals("(주)한빛상사", parsed?.merchant)
