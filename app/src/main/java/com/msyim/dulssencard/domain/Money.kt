@@ -49,4 +49,23 @@ object Times {
         epochMillis?.let { LIST_FORMAT.format(Instant.ofEpochMilli(it)) } ?: "--/-- --:--"
 
     fun logStamp(epochMillis: Long): String = LOG_FORMAT.format(Instant.ofEpochMilli(epochMillis))
+
+    /**
+     * "2시간 전" 같은 상대 시각. 수집 공백을 한눈에 알아채게 하는 데 쓴다.
+     *
+     * 일주일이 넘으면 날짜로 바꾼다 — "43일 전"은 계산을 강요하지만 "08/01"은 바로 읽힌다.
+     * 미래 시각(기기 시계가 틀린 경우)은 "방금"으로 뭉갠다.
+     */
+    fun ago(epochMillis: Long, now: Long = System.currentTimeMillis()): String {
+        val minutes = (now - epochMillis) / 60_000L
+        return when {
+            minutes < 1 -> "방금"
+            minutes < 60 -> "${minutes}분 전"
+            minutes < 24 * 60 -> "${minutes / 60}시간 전"
+            minutes < 7 * 24 * 60 -> "${minutes / (24 * 60)}일 전"
+            else -> DAY_FORMAT.format(Instant.ofEpochMilli(epochMillis))
+        }
+    }
+
+    private val DAY_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM/dd").withZone(Cycle.ZONE)
 }

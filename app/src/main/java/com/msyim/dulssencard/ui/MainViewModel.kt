@@ -1,13 +1,10 @@
 package com.msyim.dulssencard.ui
 
-import android.Manifest
 import android.app.Application
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.msyim.dulssencard.backup.message
 import com.msyim.dulssencard.data.DulSsenRepository
 import com.msyim.dulssencard.data.Settings
 import com.msyim.dulssencard.data.model.Card
@@ -19,6 +16,7 @@ import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Cycle
 import com.msyim.dulssencard.domain.Money
+import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.Ingestor
 import com.msyim.dulssencard.ingest.RawMessage
 import com.msyim.dulssencard.ingest.IssuerRegistry
@@ -35,12 +33,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
-enum class Screen { ONBOARD, HOME, INBOX, DETAIL, CARDS, EDIT, SETTINGS, SOURCES }
+enum class Screen { ONBOARD, HOME, INBOX, DETAIL, CARDS, EDIT, SETTINGS, SOURCES, CARD_DETAIL, MANUAL, BACKUP }
 
 enum class InboxTab { PENDING, ALL, EXCLUDED }
 
@@ -58,6 +54,37 @@ data class CardForm(
      */
     val initialAmount: String = "",
 )
+
+/** 직접 입력 폼. 현금성 결제·알림이 안 온 결제·증감 보정. */
+data class ManualForm(
+    val kind: ManualKind = ManualKind.PAYMENT,
+    val cardId: String? = null,
+    val amount: String = "",
+    /** 증감 보정일 때 감액인가. */
+    val negative: Boolean = false,
+    /** 오늘로부터 며칠 전인가(0 = 오늘). 날짜 선택기 대신 쓴다 — 누락 결제는 대개 최근 며칠이다. */
+    val daysAgo: Int = 0,
+    val merchant: String = "",
+)
+
+enum class ManualKind(val label: String) {
+    PAYMENT("결제 추가"),
+    CANCEL("취소 추가"),
+    ADJUST("금액 보정"),
+}
+
+/** 백업 가져오기 진행 단계. */
+sealed interface ImportStage {
+    data object Idle : ImportStage
+    data object Working : ImportStage
+    data class NeedPassword(val error: String? = null) : ImportStage
+    data class Preview(
+        val payload: com.msyim.dulssencard.backup.BackupPayload,
+        val mode: com.msyim.dulssencard.backup.ImportPlanner.Mode,
+        val summary: com.msyim.dulssencard.backup.ImportPlanner.Summary,
+    ) : ImportStage
+    data class Failed(val message: String) : ImportStage
+}
 
 data class Toast(val message: String, val undoable: Boolean)
 
@@ -80,10 +107,20 @@ data class UiState(
     val defaultSmsPackage: String? = null,
     val form: CardForm = CardForm(),
     val toast: Toast? = null,
-    val needsSmsPermission: Boolean = false,
-    val exportFileUri: String? = null,
-    val needsImagePermission: Boolean = false,
     val showImagePicker: Boolean = false,
+    /** 카드 상세에서 보고 있는 카드. */
+    val selectedCardId: String? = null,
+    /** 결과함 카드 필터. null = 전체, [InboxFilter.UNASSIGNED] = 미분류. */
+    val inboxCardFilter: String? = null,
+    val inboxThisCycleOnly: Boolean = false,
+    /** 온보딩 단계 0~3. */
+    val onboardingStep: Int = 0,
+    val manualForm: ManualForm = ManualForm(),
+    val exportBusy: Boolean = false,
+    val importStage: ImportStage = ImportStage.Idle,
+    val autoBackups: List<com.msyim.dulssencard.backup.AutoBackupStore.Entry> = emptyList(),
+    /** 취소 거래 상세에서 고를 원 승인 거래 후보. null = 아직 안 불러옴. */
+    val cancelCandidates: List<Txn>? = null,
 ) {
     val pendingCount: Int get() = txns.count { it.status == TxStatus.PENDING }
 
@@ -265,6 +302,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 온보딩
 
+    /**
+     * 온보딩은 네 단계다: 알림 접근 허용 → 읽을 앱 선택 → 카드 등록 → 초기 사용액.
+     * 한 화면에서 전부 설명하면 사용자가 무엇을 해야 끝나는지 모른다. 단계마다 할 일이 하나다.
+     */
+    fun onboardingNext() {
+        _state.value = _state.value.copy(onboardingStep = (_state.value.onboardingStep + 1).coerceAtMost(3))
+    }
+
+    fun onboardingBack() {
+        _state.value = _state.value.copy(onboardingStep = (_state.value.onboardingStep - 1).coerceAtLeast(0))
+    }
+
     fun completeOnboarding(enableCollection: Boolean) {
         viewModelScope.launch {
             repository.putSetting(Settings.ONBOARDING_DONE, "true")
@@ -327,7 +376,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(form = transform(_state.value.form))
     }
 
-    fun saveCard() {
+    /** [after] 저장 뒤 갈 화면. 온보딩에서는 다음 단계에 머문다. */
+    fun saveCard(after: Screen = Screen.CARDS) {
         val form = _state.value.form
         val target = Money.parseAmount(form.target)
         val keywords = splitKeywords(form.keywords)
@@ -369,7 +419,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 ),
             )
-            _state.value = _state.value.copy(screen = Screen.CARDS)
+            _state.value = _state.value.copy(
+                screen = after,
+                form = if (after == Screen.ONBOARD) CardForm() else _state.value.form,
+            )
             say(if (editingId == null) "카드를 저장했습니다" else "변경을 저장했습니다", undoable = false)
         }
     }
@@ -501,20 +554,314 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
             repository.wipeAll()
+            // 복원 전 자동 백업도 데이터 사본이다. 남겨 두면 "전체 삭제" 뒤에도 기기에 거래가 남는다.
+            // 파일과 그걸 여는 Keystore 키를 함께 버린다. (방금 삭제는 4.2초 되돌리기가 메모리 스냅샷으로 가능하다.)
+            withContext(Dispatchers.IO) {
+                runCatching { backupManager.deleteAllAutoBackups() }
+                com.msyim.dulssencard.backup.DeviceBackupKey.destroy()
+            }
             // 삭제는 알림 소스 목록도 비운다. 곧바로 다시 채우지 않으면 수집이 통째로 멈춘다.
             seedSourceApps()
             say("로컬 데이터를 모두 삭제했습니다", undoable = true)
         }
     }
 
+    // ------------------------------------------------------------- 카드 상세 · 초기 사용액
+
+    fun openCard(card: Card, from: Screen = Screen.HOME) {
+        toastJob?.cancel()
+        _state.value = _state.value.copy(
+            screen = Screen.CARD_DETAIL,
+            selectedCardId = card.id,
+            backTo = from,
+            toast = null,
+        )
+    }
+
     /**
-     * 암호화 백업이 완성되기 전까지 **아무것도 쓰지 않는다.**
-     *
-     * 이전 구현은 이름과 달리 암호화 없이 전체 거래를 평문 JSON 으로 외부 저장소에 썼다.
-     * SQLCipher 로 DB 를 잠가 놓고 그 옆에 평문 사본을 떨구는 셈이라 막아 둔다.
+     * 초기 사용액을 바로 다시 맞춘다(홈·카드 상세). 기준 시각은 지금이다.
+     * 되돌릴 수 있게 스냅샷을 뜬다 — 숫자를 잘못 쳤을 때 카드 편집까지 들어가지 않게.
      */
-    fun exportEncrypted() {
-        say("암호화 백업을 준비 중입니다", undoable = false)
+    fun setInitialAmount(card: Card, amount: Long) {
+        viewModelScope.launch {
+            undoSnapshot = repository.snapshot()
+            repository.setInitialAmount(card.id, amount)
+            say(
+                if (amount == 0L) "${card.nickname} 초기 사용액을 껐습니다" else "${card.nickname} 기준액을 ${Money.won(amount)}으로 맞췄습니다",
+                undoable = true,
+            )
+        }
+    }
+
+    // ------------------------------------------------------------- 결과함 필터
+
+    fun setInboxCardFilter(cardId: String?) {
+        _state.value = _state.value.copy(inboxCardFilter = cardId)
+    }
+
+    fun toggleInboxThisCycle() {
+        _state.value = _state.value.copy(inboxThisCycleOnly = !_state.value.inboxThisCycleOnly)
+    }
+
+    /** 카드 상세의 "확인 필요 N건"에서 결과함으로 넘어갈 때 그 카드로 걸러 둔다. */
+    fun openInboxFor(cardId: String?, tab: InboxTab) {
+        toastJob?.cancel()
+        _state.value = _state.value.copy(
+            screen = Screen.INBOX,
+            inboxTab = tab,
+            inboxCardFilter = cardId,
+            toast = null,
+        )
+    }
+
+    // ------------------------------------------------------------- 직접 입력 · 금액 정정
+
+    fun openManualEntry(cardId: String?, from: Screen) {
+        toastJob?.cancel()
+        _state.value = _state.value.copy(
+            screen = Screen.MANUAL,
+            backTo = from,
+            manualForm = ManualForm(cardId = cardId ?: _state.value.cards.singleOrNull()?.id),
+            toast = null,
+        )
+    }
+
+    fun updateManualForm(transform: (ManualForm) -> ManualForm) {
+        _state.value = _state.value.copy(manualForm = transform(_state.value.manualForm))
+    }
+
+    fun saveManualEntry() {
+        val form = _state.value.manualForm
+        val amount = Money.parseAmount(form.amount)
+        if (amount == null || amount <= 0L) {
+            say("금액을 입력해 주세요", undoable = false)
+            return
+        }
+        if (form.cardId == null) {
+            say("카드를 골라 주세요", undoable = false)
+            return
+        }
+        // 날짜만 고르고 시각은 지금으로 둔다. 며칠 전을 고르면 그날 정오로 — 주기 경계(자정)에 걸리지 않게.
+        val occurredAt = if (form.daysAgo == 0) {
+            System.currentTimeMillis()
+        } else {
+            java.time.LocalDate.now(Cycle.ZONE).minusDays(form.daysAgo.toLong())
+                .atTime(12, 0).atZone(Cycle.ZONE).toInstant().toEpochMilli()
+        }
+        val direction = when (form.kind) {
+            ManualKind.PAYMENT -> com.msyim.dulssencard.data.model.TxDirection.APPROVAL
+            ManualKind.CANCEL -> com.msyim.dulssencard.data.model.TxDirection.CANCEL
+            ManualKind.ADJUST -> com.msyim.dulssencard.data.model.TxDirection.MANUAL
+        }
+        val signed = if (form.kind == ManualKind.ADJUST && form.negative) -amount else amount
+        viewModelScope.launch {
+            undoSnapshot = repository.snapshot()
+            repository.addManualTxn(form.cardId, signed, direction, occurredAt, form.merchant)
+            _state.value = _state.value.copy(screen = _state.value.backTo)
+            say("${form.kind.label}: ${Money.won(signed)}", undoable = true)
+        }
+    }
+
+    fun correctAmount(txn: Txn, amount: Long) {
+        viewModelScope.launch {
+            undoSnapshot = repository.snapshot()
+            repository.correctAmount(txn, amount)
+            say("금액을 ${Money.won(amount)}으로 정정했습니다", undoable = true)
+        }
+    }
+
+    // ------------------------------------------------------------- 취소 거래 연결
+
+    fun loadCancelCandidates(cancel: Txn) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(cancelCandidates = repository.cancelCandidates(cancel))
+        }
+    }
+
+    fun clearCancelCandidates() {
+        _state.value = _state.value.copy(cancelCandidates = null)
+    }
+
+    fun linkCancel(cancel: Txn, origin: Txn) {
+        viewModelScope.launch {
+            undoSnapshot = repository.snapshot()
+            repository.linkCancel(cancel, origin)
+            _state.value = _state.value.copy(cancelCandidates = null)
+            say("원 승인 거래에 연결했습니다", undoable = true)
+        }
+    }
+
+    // ------------------------------------------------------------- 백업
+
+    private val backupManager by lazy {
+        val context = getApplication<Application>()
+        com.msyim.dulssencard.backup.BackupManager(
+            repository = repository,
+            autoBackups = com.msyim.dulssencard.backup.AutoBackupStore(
+                directory = File(context.filesDir, "auto-backups"),
+                keyProvider = com.msyim.dulssencard.backup.DeviceBackupKey::getOrCreate,
+            ),
+            appVersion = com.msyim.dulssencard.BuildConfig.VERSION_NAME,
+        )
+    }
+
+    /** 가져오기 중인 파일. 상태(StateFlow)에 두지 않는다 — 화면 재구성마다 복사·비교되면 안 된다. */
+    private var importBytes: ByteArray? = null
+
+    fun openBackup() {
+        toastJob?.cancel()
+        _state.value = _state.value.copy(screen = Screen.BACKUP, toast = null)
+        refreshAutoBackups()
+    }
+
+    private fun refreshAutoBackups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = runCatching { backupManager.autoBackupList() }.getOrDefault(emptyList())
+            _state.value = _state.value.copy(autoBackups = list)
+        }
+    }
+
+    fun exportPasswordProblem(password: String, confirm: String): String? =
+        backupManager.passwordProblem(password.toCharArray(), confirm.toCharArray())
+
+    /**
+     * 사용자가 파일 선택기에서 고른 위치에 암호화 백업을 쓴다.
+     *
+     * 평문은 메모리에만 있다가 암호화되고, 파일에는 암호문만 나간다. 비밀번호 문자 배열은 끝나면 지운다.
+     * (화면 입력칸의 String 사본까지 지울 수는 없다 — JVM 문자열은 불변이다.)
+     */
+    fun exportTo(uri: Uri, password: String) {
+        val chars = password.toCharArray()
+        _state.value = _state.value.copy(exportBusy = true)
+        viewModelScope.launch {
+            try {
+                val bytes = backupManager.export(chars)
+                withContext(Dispatchers.IO) {
+                    val resolver = getApplication<Application>().contentResolver
+                    requireNotNull(resolver.openOutputStream(uri, "wt")) { "파일을 열 수 없습니다" }.use { it.write(bytes) }
+                }
+                say("암호화 백업을 저장했습니다", undoable = false)
+            } catch (e: Exception) {
+                say("백업을 저장하지 못했습니다", undoable = false)
+            } finally {
+                chars.fill(Char(0))
+                _state.value = _state.value.copy(exportBusy = false)
+            }
+        }
+    }
+
+    fun importPicked(uri: Uri) {
+        _state.value = _state.value.copy(importStage = ImportStage.Working)
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    getApplication<Application>().contentResolver.openInputStream(uri)?.use { input ->
+                        // 64MB 를 넘는 파일은 끝까지 읽지 않는다. 엉뚱한 동영상을 골랐을 때 메모리를 지킨다.
+                        val limit = com.msyim.dulssencard.backup.BackupCrypto.MAX_FILE_BYTES
+                        val buffer = input.readNBytesCompat(limit + 1)
+                        if (buffer.size > limit) null else buffer
+                    }
+                }.getOrNull()
+            }
+            _state.value = _state.value.copy(
+                importStage = when {
+                    bytes == null -> ImportStage.Failed("파일을 읽지 못했습니다(너무 크거나 열 수 없음)")
+                    backupManager.requiresPassword(bytes) == null -> ImportStage.Failed("덜쎈카드 백업 파일이 아닙니다")
+                    backupManager.requiresPassword(bytes) == false ->
+                        ImportStage.Failed("이 기기의 자동 백업 파일입니다. 아래 '자동 백업'에서 되돌리세요")
+                    else -> {
+                        importBytes = bytes
+                        ImportStage.NeedPassword()
+                    }
+                },
+            )
+        }
+    }
+
+    fun openImport(password: String) {
+        val bytes = importBytes ?: return
+        val chars = password.toCharArray()
+        _state.value = _state.value.copy(importStage = ImportStage.Working)
+        viewModelScope.launch {
+            val result = try {
+                backupManager.open(bytes, chars)
+            } finally {
+                chars.fill(Char(0))
+            }
+            _state.value = _state.value.copy(importStage = stageFor(result, com.msyim.dulssencard.backup.ImportPlanner.Mode.MERGE))
+        }
+    }
+
+    private suspend fun stageFor(
+        result: com.msyim.dulssencard.backup.BackupManager.OpenResult,
+        mode: com.msyim.dulssencard.backup.ImportPlanner.Mode,
+    ): ImportStage = when (result) {
+        is com.msyim.dulssencard.backup.BackupManager.OpenResult.Opened ->
+            ImportStage.Preview(result.payload, mode, backupManager.preview(result.payload, mode).summary)
+        is com.msyim.dulssencard.backup.BackupManager.OpenResult.Failed ->
+            if (result.failure == com.msyim.dulssencard.backup.BackupCrypto.Failure.WrongPasswordOrCorrupted) {
+                ImportStage.NeedPassword(error = "비밀번호가 틀렸거나 파일이 손상되었습니다")
+            } else {
+                ImportStage.Failed(result.failure.message())
+            }
+        is com.msyim.dulssencard.backup.BackupManager.OpenResult.NewerApp ->
+            ImportStage.Failed("더 새 버전의 앱에서 만든 백업입니다. 앱을 업데이트한 뒤 가져오세요")
+        is com.msyim.dulssencard.backup.BackupManager.OpenResult.Invalid ->
+            ImportStage.Failed("백업 내용에 문제가 있어 가져오지 않았습니다: " + result.problems.take(3).joinToString(" · "))
+    }
+
+    fun selectImportMode(mode: com.msyim.dulssencard.backup.ImportPlanner.Mode) {
+        val preview = _state.value.importStage as? ImportStage.Preview ?: return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(
+                importStage = preview.copy(mode = mode, summary = backupManager.preview(preview.payload, mode).summary),
+            )
+        }
+    }
+
+    /** 적용. 저장소가 [자동 백업 → 재계획 → 쓰기]를 한 트랜잭션으로 한다. */
+    fun applyImport() {
+        val preview = _state.value.importStage as? ImportStage.Preview ?: return
+        _state.value = _state.value.copy(importStage = ImportStage.Working)
+        viewModelScope.launch {
+            try {
+                val plan = backupManager.apply(preview.payload, preview.mode)
+                importBytes = null
+                _state.value = _state.value.copy(importStage = ImportStage.Idle)
+                refreshAutoBackups()
+                val s = plan.summary
+                say("가져왔습니다 · 카드 +${s.cardsAdded} · 거래 +${s.txnsAdded} 갱신 ${s.txnsUpdated}", undoable = false)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(
+                    importStage = ImportStage.Failed("가져오지 못했습니다. 아무것도 바뀌지 않았습니다"),
+                )
+            }
+        }
+    }
+
+    fun cancelImport() {
+        importBytes = null
+        _state.value = _state.value.copy(importStage = ImportStage.Idle)
+    }
+
+    /** 자동 백업으로 되돌린다. 이것도 적용 전에 현재 상태를 자동 백업한다. */
+    fun restoreAutoBackup(entry: com.msyim.dulssencard.backup.AutoBackupStore.Entry) {
+        _state.value = _state.value.copy(importStage = ImportStage.Working)
+        viewModelScope.launch {
+            try {
+                when (val result = backupManager.openAutoBackup(entry)) {
+                    is com.msyim.dulssencard.backup.BackupManager.OpenResult.Opened -> {
+                        backupManager.apply(result.payload, com.msyim.dulssencard.backup.ImportPlanner.Mode.REPLACE)
+                        _state.value = _state.value.copy(importStage = ImportStage.Idle)
+                        refreshAutoBackups()
+                        say("${Times.logStamp(entry.createdAt)} 시점으로 되돌렸습니다", undoable = false)
+                    }
+                    else -> _state.value = _state.value.copy(importStage = stageFor(result, com.msyim.dulssencard.backup.ImportPlanner.Mode.REPLACE))
+                }
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(importStage = ImportStage.Failed("되돌리지 못했습니다. 아무것도 바뀌지 않았습니다"))
+            }
+        }
     }
 
     /**
@@ -654,4 +1001,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         /** README: 스낵바는 4.2초 후 자동 소멸하고, 되돌리기도 그때 만료된다. */
         const val TOAST_DURATION_MS = 4_200L
     }
+}
+
+/**
+ * `InputStream.readNBytes(int)` 는 API 33 부터다(minSdk 26). 최대 [limit] 바이트까지만 읽는다 —
+ * 사용자가 엉뚱한 대용량 파일을 골라도 끝까지 메모리에 올리지 않기 위해서다.
+ */
+private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val chunk = ByteArray(64 * 1024)
+    var total = 0
+    while (total < limit) {
+        val read = read(chunk, 0, minOf(chunk.size, limit - total))
+        if (read < 0) break
+        out.write(chunk, 0, read)
+        total += read
+    }
+    return out.toByteArray()
 }

@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -17,6 +20,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,7 +38,10 @@ import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.IssuerRegistry
+import com.msyim.dulssencard.ui.component.AmountEditDialog
 import com.msyim.dulssencard.ui.component.DestructiveButton
+import com.msyim.dulssencard.ui.component.DsTextButton
+import com.msyim.dulssencard.ui.component.OutlineButton
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.DsToggle
 import com.msyim.dulssencard.ui.component.Hairline
@@ -58,9 +68,24 @@ fun DetailScreen(
     onConfirm: () -> Unit,
     onExclude: () -> Unit,
     onRestore: () -> Unit,
+    allTxns: List<Txn>,
+    cancelCandidates: List<Txn>?,
+    onCorrectAmount: (Long) -> Unit,
+    onLoadCancelCandidates: () -> Unit,
+    onPickOrigin: (Txn) -> Unit,
+    onDismissCandidates: () -> Unit,
+    onOpenTxn: (Txn) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val meta = statusMeta(txn)
+    var correcting by remember { mutableStateOf(false) }
+    val origin = txn.relatedTransactionId?.let { id -> allTxns.firstOrNull { it.id == id } }
+    // 이 결제를 취소한 거래. 승인 쪽에서도 "취소됐는지"를 보여 줘야 합계가 왜 줄었는지 안다.
+    val cancelledBy = if (txn.direction == TxDirection.APPROVAL) {
+        allTxns.firstOrNull { it.relatedTransactionId == txn.id && it.direction == TxDirection.CANCEL }
+    } else {
+        null
+    }
     LazyColumn(modifier.fillMaxWidth()) {
         item {
             Text(
@@ -109,8 +134,35 @@ fun DetailScreen(
                         style = DsType.footnote,
                     )
                 }
+                Spacer(Modifier.height(6.dp))
+                DsTextButton("금액 정정", { correcting = true })
             }
             Hairline()
+        }
+
+        if (txn.direction == TxDirection.CANCEL) {
+            item {
+                LinkedTxnSection(
+                    title = "원 승인 거래",
+                    linked = origin,
+                    emptyText = "연결된 원 승인 거래가 없습니다. 같은 결제의 승인 거래를 골라 이어 주세요 - " +
+                        "연결하면 원 거래의 카드로 반영됩니다.",
+                    actionLabel = if (origin == null) "원 거래 선택" else "다른 거래로 바꾸기",
+                    onAction = onLoadCancelCandidates,
+                    onOpen = onOpenTxn,
+                )
+            }
+        } else if (cancelledBy != null) {
+            item {
+                LinkedTxnSection(
+                    title = "이 결제의 취소",
+                    linked = cancelledBy,
+                    emptyText = "",
+                    actionLabel = null,
+                    onAction = {},
+                    onOpen = onOpenTxn,
+                )
+            }
         }
 
         item { CardPicker(cards, txn.cardId, onMoveToCard) }
@@ -154,6 +206,130 @@ fun DetailScreen(
             }
         }
     }
+
+    if (correcting) {
+        AmountEditDialog(
+            title = "금액 정정",
+            message = "알림에서 금액을 잘못 읽었거나 부분 취소가 반영되지 않았을 때 고칩니다. 변경 기록에 남습니다.",
+            initial = txn.amount,
+            confirmLabel = "정정",
+            onDismiss = { correcting = false },
+            onConfirm = onCorrectAmount,
+        )
+    }
+
+    cancelCandidates?.let { candidates ->
+        OriginPickerDialog(
+            cancel = txn,
+            candidates = candidates,
+            cards = cards,
+            onDismiss = onDismissCandidates,
+            onPick = onPickOrigin,
+        )
+    }
+}
+
+@Composable
+private fun LinkedTxnSection(
+    title: String,
+    linked: Txn?,
+    emptyText: String,
+    actionLabel: String?,
+    onAction: () -> Unit,
+    onOpen: (Txn) -> Unit,
+) {
+    Column(Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 20.dp, bottom = 16.dp)) {
+        SectionLabel(title)
+        Spacer(Modifier.height(10.dp))
+        if (linked == null) {
+            Text(emptyText, style = DsType.listSecondary.copy(color = Ds.accentPress))
+        } else {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Ds.radiusBanner))
+                    .border(Ds.hairline, Ds.line, RoundedCornerShape(Ds.radiusBanner))
+                    .clickable { onOpen(linked) }
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(linked.merchant ?: "미확인 가맹점", style = DsType.listPrimary.copy(fontSize = 14.sp))
+                    Text(Times.listStamp(linked.occurredAt), style = DsType.listSecondary)
+                }
+                Text(Money.won(linked.amount), style = DsType.txAmount)
+            }
+        }
+        if (actionLabel != null) {
+            Spacer(Modifier.height(10.dp))
+            OutlineButton(actionLabel, onAction)
+        }
+    }
+    Hairline()
+}
+
+/**
+ * 원 승인 거래 고르기. 후보는 같은 금액을 먼저, 최근 순으로 보인다([DulSsenRepository.cancelCandidates]).
+ * 부분 취소를 위해 금액이 더 큰 승인도 보여 준다.
+ */
+@Composable
+private fun OriginPickerDialog(
+    cancel: Txn,
+    candidates: List<Txn>,
+    cards: List<Card>,
+    onDismiss: () -> Unit,
+    onPick: (Txn) -> Unit,
+) {
+    val names = cards.associate { it.id to it.nickname }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Ds.paper,
+        title = { Text("원 승인 거래 선택", style = DsType.listPrimary.copy(fontSize = 16.sp)) },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "취소 ${Money.won(cancel.amount)} · ${Times.listStamp(cancel.occurredAt)} 이전의 승인 거래입니다.",
+                    style = DsType.listSecondary,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (candidates.isEmpty()) {
+                    Text("고를 수 있는 승인 거래가 없습니다.", style = DsType.listSecondary)
+                }
+                candidates.forEach { candidate ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(candidate) }
+                            .padding(vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(candidate.merchant ?: "미확인 가맹점", style = DsType.listPrimary.copy(fontSize = 14.sp), maxLines = 1)
+                            Text(
+                                "${names[candidate.cardId] ?: "미분류"} · ${Times.listStamp(candidate.occurredAt)}",
+                                style = DsType.listSecondary,
+                            )
+                        }
+                        Text(
+                            Money.won(candidate.amount),
+                            style = DsType.txAmount.copy(color = if (candidate.amount == cancel.amount) Ds.ink else Ds.text3),
+                        )
+                    }
+                    Hairline()
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("닫기", style = DsType.listPrimary.copy(color = Ds.textSubtle))
+            }
+        },
+    )
 }
 
 @Composable
