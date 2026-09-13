@@ -28,6 +28,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.msyim.dulssencard.data.DulSsenRepository
 import com.msyim.dulssencard.domain.Aggregator
+import com.msyim.dulssencard.ui.screen.RecentCollection
+import com.msyim.dulssencard.ui.screen.ManualEntryScreen
+import com.msyim.dulssencard.ui.screen.CardDetailScreen
+import com.msyim.dulssencard.ui.screen.BackupScreen
+import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.ingest.SourceGate
 import com.msyim.dulssencard.ui.component.CountBadge
 import com.msyim.dulssencard.ui.component.DsSnackbar
@@ -105,36 +110,92 @@ private fun ScreenContent(
 
     when (state.screen) {
         Screen.ONBOARD -> OnboardingScreen(
-            onAccept = {
-                viewModel.completeOnboarding(enableCollection = true)
-                // 알림 접근은 앱이 요청할 수 없다. 동의 직후 시스템 설정으로 보내 준다.
-                if (!state.hasNotificationAccess) {
-                    context.startActivity(SourceGate.notificationAccessSettingsIntent())
-                }
-            },
-            onDecline = { viewModel.completeOnboarding(enableCollection = false) },
+            step = state.onboardingStep,
+            hasNotificationAccess = state.hasNotificationAccess,
+            sourceApps = state.sourceApps,
+            defaultSmsPackage = state.defaultSmsPackage,
+            cards = state.cards,
+            cardRows = cardRows,
+            cardForm = state.form,
+            onOpenNotificationAccess = { context.startActivity(SourceGate.notificationAccessSettingsIntent()) },
+            onToggleSource = viewModel::setSourceAppEnabled,
+            onCardFormChange = viewModel::updateForm,
+            onSaveCard = { viewModel.saveCard(after = Screen.ONBOARD) },
+            onSetInitialAmount = viewModel::setInitialAmount,
+            onNext = viewModel::onboardingNext,
+            onBack = viewModel::onboardingBack,
+            onFinish = viewModel::completeOnboarding,
         )
 
-        Screen.HOME -> HomeScreen(
-            limit = limitProgress,
-            rows = cardRows,
-            pendingCount = state.pendingCount,
-            sortByName = state.sortByName,
-            foreignSpend = foreignSpend,
-            collectionGap = state.collectionGap,
-            onOpenLimitSettings = { viewModel.go(Screen.SETTINGS) },
-            onOpenPending = { viewModel.openInbox(InboxTab.PENDING) },
-            onToggleSort = viewModel::toggleSort,
-            onCardClick = { viewModel.openInbox(InboxTab.ALL) },
-            onOpenSettings = { viewModel.go(Screen.SETTINGS) },
-        )
+        Screen.HOME -> {
+            // 알림 소스별 마지막 결제 인식. 경로가 다 열려 있어도 실제로 알림이 오는지는 따로 봐야 한다.
+            val recent = remember(state.sourceApps) {
+                state.sourceApps
+                    .filter { it.enabled && it.lastPaymentAt > 0L }
+                    .sortedByDescending { it.lastPaymentAt }
+                    .map { RecentCollection(it.label, it.lastPaymentAt) }
+            }
+            val lastByCard = remember(state.txns) {
+                state.txns
+                    .filter { it.cardId != null && it.source in COLLECTED_SOURCES }
+                    .groupBy { it.cardId!! }
+                    .mapValues { (_, rows) -> rows.maxOf { it.receivedAt } }
+            }
+            HomeScreen(
+                limit = limitProgress,
+                rows = cardRows,
+                pendingCount = state.pendingCount,
+                sortByName = state.sortByName,
+                foreignSpend = foreignSpend,
+                collectionGap = state.collectionGap,
+                onOpenLimitSettings = { viewModel.go(Screen.SETTINGS) },
+                onOpenPending = { viewModel.openInboxFor(null, InboxTab.PENDING) },
+                onToggleSort = viewModel::toggleSort,
+                onCardClick = { viewModel.openCard(it, Screen.HOME) },
+                onOpenSettings = { viewModel.go(Screen.SETTINGS) },
+                recentCollection = recent,
+                lastCollectedByCard = lastByCard,
+                onSetInitialAmount = viewModel::setInitialAmount,
+                onOpenSources = { viewModel.go(Screen.SOURCES) },
+            )
+        }
+
+        Screen.CARD_DETAIL -> {
+            val card = state.cards.firstOrNull { it.id == state.selectedCardId }
+            if (card == null) {
+                viewModel.go(Screen.HOME)
+            } else {
+                val breakdown = remember(card, state.txns) { Aggregator.cardBreakdown(card, state.txns) }
+                CardDetailScreen(
+                    breakdown = breakdown,
+                    onBack = { viewModel.go(Screen.HOME) },
+                    onOpenTxn = { viewModel.openTxn(it.id, Screen.CARD_DETAIL) },
+                    onSetInitialAmount = { amount -> viewModel.setInitialAmount(card, amount) },
+                    onAddManual = { viewModel.openManualEntry(card.id, Screen.CARD_DETAIL) },
+                    onEditCard = { viewModel.editCard(card) },
+                    onOpenPending = { viewModel.openInboxFor(card.id, InboxTab.PENDING) },
+                )
+            }
+        }
 
         Screen.INBOX -> InboxScreen(
             txns = state.txns,
             cards = state.cards,
             tab = state.inboxTab,
+            cardFilter = state.inboxCardFilter,
+            thisCycleOnly = state.inboxThisCycleOnly,
+            limitCycleStartDay = state.limitCycleStartDay,
             onSelectTab = viewModel::selectInboxTab,
+            onSelectCard = viewModel::setInboxCardFilter,
+            onToggleThisCycle = viewModel::toggleInboxThisCycle,
             onOpenTxn = { viewModel.openTxn(it.id, Screen.INBOX) },
+            onConfirm = viewModel::confirmTxn,
+            onExclude = viewModel::excludeTxn,
+            onAssignCard = viewModel::moveTxnToCard,
+            onAddManual = {
+                val filtered = state.inboxCardFilter?.takeIf { it != InboxFilter.UNASSIGNED }
+                viewModel.openManualEntry(filtered, Screen.INBOX)
+            },
         )
 
         Screen.DETAIL -> {
@@ -156,9 +217,24 @@ private fun ScreenContent(
                     onConfirm = { viewModel.confirmTxn(txn) },
                     onExclude = { viewModel.excludeTxn(txn) },
                     onRestore = { viewModel.restoreTxn(txn) },
+                    allTxns = state.txns,
+                    cancelCandidates = state.cancelCandidates,
+                    onCorrectAmount = { amount -> viewModel.correctAmount(txn, amount) },
+                    onLoadCancelCandidates = { viewModel.loadCancelCandidates(txn) },
+                    onPickOrigin = { origin -> viewModel.linkCancel(txn, origin) },
+                    onDismissCandidates = viewModel::clearCancelCandidates,
+                    onOpenTxn = { viewModel.openTxn(it.id, state.backTo) },
                 )
             }
         }
+
+        Screen.MANUAL -> ManualEntryScreen(
+            form = state.manualForm,
+            cards = state.cards,
+            onChange = viewModel::updateManualForm,
+            onSave = viewModel::saveManualEntry,
+            onBack = viewModel::back,
+        )
 
         Screen.CARDS -> CardListScreen(
             cards = state.cards,
@@ -172,7 +248,7 @@ private fun ScreenContent(
             existingCard = state.cards.firstOrNull { it.id == state.editingCardId },
             onBack = { viewModel.go(Screen.CARDS) },
             onChange = viewModel::updateForm,
-            onSave = viewModel::saveCard,
+            onSave = { viewModel.saveCard() },
             onDelete = viewModel::deleteCard,
         )
 
@@ -192,18 +268,40 @@ private fun ScreenContent(
                 context.startActivity(SourceGate.notificationAccessSettingsIntent())
             },
             onOpenSourceApps = { viewModel.go(Screen.SOURCES) },
-            onExportEncrypted = viewModel::exportEncrypted,
+            onOpenBackup = viewModel::openBackup,
             onImportFromImage = viewModel::requestImageImport,
             onWipe = viewModel::wipeAll,
         )
 
         Screen.SOURCES -> SourceAppsScreen(
             apps = state.sourceApps,
+            hasNotificationAccess = state.hasNotificationAccess,
+            autoCollectEnabled = state.autoCollectEnabled,
+            defaultSmsPackage = state.defaultSmsPackage,
+            onOpenNotificationAccess = { context.startActivity(SourceGate.notificationAccessSettingsIntent()) },
             onBack = { viewModel.go(Screen.SETTINGS) },
             onToggle = viewModel::setSourceAppEnabled,
         )
+
+        Screen.BACKUP -> BackupScreen(
+            busy = state.exportBusy,
+            importStage = state.importStage,
+            autoBackups = state.autoBackups,
+            passwordProblem = viewModel::exportPasswordProblem,
+            onBack = { viewModel.go(Screen.SETTINGS) },
+            onExport = viewModel::exportTo,
+            onImportPicked = viewModel::importPicked,
+            onOpenImport = viewModel::openImport,
+            onSelectMode = viewModel::selectImportMode,
+            onApplyImport = viewModel::applyImport,
+            onCancelImport = viewModel::cancelImport,
+            onRestoreAuto = viewModel::restoreAutoBackup,
+        )
     }
 }
+
+/** 알림에서 수집한 거래의 경로. 직접 입력·캡처는 '수집'이 아니다. */
+private val COLLECTED_SOURCES = setOf(TxSource.SMS, TxSource.PUSH, TxSource.KAKAO)
 
 /** 하단 4탭. 결과함 탭에는 확인 필요 건수 배지가 붙는다(0건이면 숨김). */
 @Composable
@@ -216,9 +314,10 @@ private fun BottomNav(current: Screen, pendingCount: Int, onSelect: (Screen) -> 
     )
     // 상세·편집·소스는 각각 결과함·카드·설정 탭에 속한 화면으로 표시한다.
     val activeTab = when (current) {
-        Screen.DETAIL -> Screen.INBOX
+        Screen.DETAIL, Screen.MANUAL -> Screen.INBOX
+        Screen.CARD_DETAIL -> Screen.HOME
         Screen.EDIT -> Screen.CARDS
-        Screen.SOURCES -> Screen.SETTINGS
+        Screen.SOURCES, Screen.BACKUP -> Screen.SETTINGS
         else -> current
     }
 

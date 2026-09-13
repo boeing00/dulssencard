@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.msyim.dulssencard.data.model.SourceApp
 import com.msyim.dulssencard.domain.Cycle
+import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ui.component.DaySquareChip
 import com.msyim.dulssencard.ui.component.DsToggle
 import com.msyim.dulssencard.ui.component.Footnote
@@ -61,7 +62,7 @@ fun SettingsScreen(
     onToggleAutoCollect: (Boolean) -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenSourceApps: () -> Unit,
-    onExportEncrypted: () -> Unit,
+    onOpenBackup: () -> Unit,
     onImportFromImage: () -> Unit,
     onWipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -149,10 +150,10 @@ fun SettingsScreen(
 
         item {
             SettingRow(
-                title = "암호화 내보내기",
-                subtitle = "비밀번호를 잃어버리면 복구할 수 없습니다.",
-                badge = "P1",
-                onClick = onExportEncrypted,
+                title = "백업 · 가져오기",
+                subtitle = "비밀번호로 암호화한 파일로 내보내고, 다른 기기에서 병합하거나 전체 교체합니다.",
+                onClick = onOpenBackup,
+                trailing = { Text("→", style = DsType.listPrimary.copy(color = Ds.textSubtle)) },
             )
         }
 
@@ -368,14 +369,22 @@ private fun StatusPill(granted: Boolean, disabled: Boolean = false) {
 }
 
 /**
- * 알림 소스 관리.
+ * 알림 소스 관리 · 수집 진단.
  *
- * 여기 뜨는 목록은 **알림을 띄운 적 있는 앱의 이름**뿐이다. 알림 내용은 저장하지 않으며,
+ * 자동 집계가 왜 안 되는지 **사용자가 스스로 알아낼 수 있게** 한다. 위에서부터 차례로 보면 원인이 나온다:
+ * 알림 접근이 켜져 있나 → 자동 집계가 켜져 있나 → 그 앱이 켜져 있나 → 알림이 오고 있나 →
+ * 결제로 읽히고 있나(인식/실패 수).
+ *
+ * 여기 뜨는 것은 **앱 이름과 시각·개수뿐**이다. 알림 내용은 저장하지 않으며,
  * 사용자가 켠 앱에 한해서만 이후 알림의 내용을 읽는다.
  */
 @Composable
 fun SourceAppsScreen(
     apps: List<SourceApp>,
+    hasNotificationAccess: Boolean,
+    autoCollectEnabled: Boolean,
+    defaultSmsPackage: String?,
+    onOpenNotificationAccess: () -> Unit,
     onBack: () -> Unit,
     onToggle: (SourceApp, Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -392,15 +401,31 @@ fun SourceAppsScreen(
             ) {
                 Text("← 설정", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
                 Spacer(Modifier.height(14.dp))
-                Text("알림 소스", style = DsType.h2)
+                Text("알림 소스 · 수집 진단", style = DsType.h2)
                 Spacer(Modifier.height(10.dp))
                 Footnote(
                     "켠 앱의 결제 알림만 읽습니다. 끈 앱의 알림은 내용을 보지도 저장하지도 않습니다. " +
-                        "결제 문자를 읽으려면 문자 앱을 켜 두어야 합니다. " +
-                        "카드사 앱이 목록에 없으면, 그 앱에서 알림이 한 번 온 뒤 다시 확인하세요.",
+                        "여기 보이는 것은 시각과 개수뿐입니다.",
                 )
             }
             Hairline()
+        }
+
+        // ---- 권한 상태
+        item {
+            SettingRow(
+                title = "알림 접근",
+                subtitle = if (hasNotificationAccess) "허용됨 - 수집할 수 있습니다" else "꺼져 있어 아무 알림도 읽지 못합니다. 눌러서 켜세요",
+                onClick = onOpenNotificationAccess,
+                trailing = { StatusPill(hasNotificationAccess) },
+            )
+        }
+        item {
+            SettingRow(
+                title = "자동 집계",
+                subtitle = if (autoCollectEnabled) "켜짐" else "꺼짐 - 설정에서 켜야 새 결제가 반영됩니다",
+                trailing = { StatusPill(autoCollectEnabled) },
+            )
         }
 
         if (apps.isEmpty()) {
@@ -418,15 +443,72 @@ fun SourceAppsScreen(
                 }
             }
         } else {
+            item {
+                SectionLabel(
+                    "읽을 앱",
+                    Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 20.dp, bottom = 4.dp),
+                )
+            }
             items(apps, key = { it.packageName }) { app ->
-                SettingRow(
-                    title = app.label,
-                    subtitle = app.packageName,
-                    trailing = { DsToggle(app.enabled, onToggle = { onToggle(app, !app.enabled) }) },
+                SourceDiagnosticRow(
+                    app = app,
+                    isDefaultSms = app.packageName == defaultSmsPackage,
+                    onToggle = { onToggle(app, !app.enabled) },
                 )
             }
         }
 
-        item { Spacer(Modifier.height(28.dp)) }
+        item {
+            Footnote(
+                "실패는 결제 알림처럼 보이는데 금액·시각을 읽지 못한 경우만 셉니다(대화·광고는 세지 않습니다). " +
+                    "실패가 계속 늘면 카드사가 문구 형식을 바꾼 것일 수 있습니다. 카운터는 일주일마다 새로 셉니다.",
+                Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 16.dp, bottom = 28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceDiagnosticRow(app: SourceApp, isDefaultSms: Boolean, onToggle: () -> Unit) {
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Ds.screenPadding, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(app.label, style = DsType.listPrimary.copy(fontSize = 15.sp))
+                    if (isDefaultSms) {
+                        Spacer(Modifier.width(8.dp))
+                        OutlineBadge("기본 문자 앱", color = Ds.green)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    buildString {
+                        append("마지막 알림 ")
+                        append(if (app.lastSeenAt > 0) Times.ago(app.lastSeenAt) else "없음")
+                        append(" · 결제 인식 ")
+                        append(if (app.lastPaymentAt > 0) Times.ago(app.lastPaymentAt) else "없음")
+                    },
+                    style = DsType.listSecondary,
+                )
+                if (app.enabled && app.countsSince > 0) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${Times.ago(app.countsSince)}부터 인식 ${app.recognizedCount} · 실패 ${app.failedCount}",
+                        style = DsType.listSecondary.copy(color = if (app.failedCount > 0) Ds.accent else Ds.textSubtle),
+                    )
+                } else if (!app.enabled) {
+                    Spacer(Modifier.height(2.dp))
+                    Text("꺼져 있어 내용을 읽지 않습니다", style = DsType.listSecondary.copy(color = Ds.text3))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            DsToggle(app.enabled, onToggle = onToggle)
+        }
+        Hairline()
     }
 }

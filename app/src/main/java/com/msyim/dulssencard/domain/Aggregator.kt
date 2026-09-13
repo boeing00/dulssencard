@@ -1,6 +1,7 @@
 package com.msyim.dulssencard.domain
 
 import com.msyim.dulssencard.data.model.Card
+import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import java.time.Instant
@@ -184,6 +185,49 @@ object Aggregator {
             // 통화 코드순. 금액순은 의미가 없다 — 서로 다른 통화의 크기를 비교할 수 없고,
             // 최소 단위로 세면 USD 60(6000센트)이 JPY 3,000 보다 "크게" 나오는 엉뚱한 순서가 된다.
             .sortedBy { it.currency }
+    }
+
+    /**
+     * 카드 상세 화면용 분해. "이 숫자가 어떻게 나왔는지"를 사용자가 따라갈 수 있게 나눈다.
+     *
+     * [counted] 의 부호 있는 합 + [CardProgress.initialApplied] 가 정확히 [CardProgress.spent] 다.
+     * 이 등식이 깨지면 화면에 보이는 목록과 합계가 달라 사용자가 숫자를 믿지 못한다(테스트로 잠근다).
+     */
+    data class CardBreakdown(
+        val progress: CardProgress,
+        /** 이번 주기 합계에 들어간 거래. */
+        val counted: List<Txn>,
+        /** 이번 주기에 반영됐지만 초기 사용액 기준 시각 **이전**이라 초기 사용액에 들어 있다고 보는 거래. */
+        val coveredByInitial: List<Txn>,
+        /** 이번 주기 자동 반영이지만 사용자가 '목표 추적 포함'을 끈 거래. */
+        val notCountedTowardTarget: List<Txn>,
+        /** 이 카드에 붙은 확인 필요 거래. 주기와 무관하게 처리가 필요하므로 전부 보여 준다. */
+        val pending: List<Txn>,
+        /** 이번 주기에 제외 처리한 거래. */
+        val excluded: List<Txn>,
+        /** 이 카드 거래를 알림에서 마지막으로 받은 시각. 직접 입력·캡처는 수집이 아니므로 뺀다. */
+        val lastCollectedAt: Long?,
+    )
+
+    fun cardBreakdown(card: Card, txns: List<Txn>, now: Instant = Instant.now()): CardBreakdown {
+        val progress = cardProgress(card, txns, now)
+        val window = Cycle.windowFor(card.cycleStartDay, now)
+        val mine = txns.filter { it.cardId == card.id }
+        val inCycle = mine.filter { window.contains(effectiveTime(it)) }
+        val auto = inCycle.filter { it.status == TxStatus.AUTO }
+        return CardBreakdown(
+            progress = progress,
+            counted = auto.filter { it.countsTowardTarget && effectiveTime(it) > card.initialAmountAt },
+            coveredByInitial = auto.filter {
+                progress.initialApplied != 0L && it.countsTowardTarget && effectiveTime(it) <= card.initialAmountAt
+            },
+            notCountedTowardTarget = auto.filter { !it.countsTowardTarget },
+            pending = mine.filter { it.status == TxStatus.PENDING },
+            excluded = inCycle.filter { it.status == TxStatus.EXCLUDED },
+            lastCollectedAt = mine
+                .filter { it.source == TxSource.SMS || it.source == TxSource.PUSH || it.source == TxSource.KAKAO }
+                .maxOfOrNull { it.receivedAt },
+        )
     }
 
     /**

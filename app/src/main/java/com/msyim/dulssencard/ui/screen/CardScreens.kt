@@ -35,6 +35,7 @@ import com.msyim.dulssencard.ui.component.Hairline
 import com.msyim.dulssencard.ui.component.OutlineButton
 import com.msyim.dulssencard.ui.component.PrimaryButton
 import com.msyim.dulssencard.ui.component.SectionLabel
+import com.msyim.dulssencard.ui.component.UnderlinedField
 import com.msyim.dulssencard.ui.theme.Ds
 import com.msyim.dulssencard.ui.theme.DsType
 
@@ -290,59 +291,3 @@ private fun DefaultToggleRow(title: String, checked: Boolean, onToggle: () -> Un
     }
 }
 
-/**
- * 밑줄 입력 필드.
- *
- * Material 의 TextField 를 쓰지 않는 이유: 디자인이 밑줄 1px 과 정확한 baseline 정렬을
- * 요구하는데, Material 컨테이너의 기본 패딩·인디케이터를 걷어내는 비용이 직접 그리는 것보다 크다.
- */
-@Composable
-private fun UnderlinedField(
-    label: String,
-    value: String,
-    placeholder: String,
-    textStyle: TextStyle,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    keyboardType: KeyboardType = KeyboardType.Text,
-    suffix: String? = null,
-    helper: String? = null,
-    underlineColor: androidx.compose.ui.graphics.Color = Ds.ink,
-) {
-    Column(modifier.fillMaxWidth()) {
-        Text(label.uppercase(), style = DsType.fieldLabel)
-        Spacer(Modifier.height(8.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                if (value.isEmpty()) {
-                    Text(placeholder, style = textStyle.copy(color = Ds.text3))
-                }
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    textStyle = textStyle,
-                    singleLine = true,
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(Ds.ink),
-                    keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-            if (suffix != null) {
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    suffix,
-                    style = DsType.listPrimary.copy(
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Normal,
-                        fontSize = 14.sp,
-                    ),
-                )
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Box(Modifier.fillMaxWidth().height(Ds.hairline).background(underlineColor))
-        if (helper != null) {
-            Spacer(Modifier.height(8.dp))
-            Footnote(helper)
-        }
-    }
-}

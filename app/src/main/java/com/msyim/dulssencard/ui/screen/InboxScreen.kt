@@ -1,6 +1,9 @@
 package com.msyim.dulssencard.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +21,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,7 +38,10 @@ import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
+import com.msyim.dulssencard.ui.InboxFilter
 import com.msyim.dulssencard.ui.InboxTab
+import com.msyim.dulssencard.ui.component.CardPickerDialog
+import com.msyim.dulssencard.ui.component.DsTextButton
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.Hairline
 import com.msyim.dulssencard.ui.component.SectionLabel
@@ -59,18 +69,27 @@ fun InboxScreen(
     txns: List<Txn>,
     cards: List<Card>,
     tab: InboxTab,
+    cardFilter: String?,
+    thisCycleOnly: Boolean,
+    limitCycleStartDay: Int,
     onSelectTab: (InboxTab) -> Unit,
+    onSelectCard: (String?) -> Unit,
+    onToggleThisCycle: () -> Unit,
     onOpenTxn: (Txn) -> Unit,
+    onConfirm: (Txn) -> Unit,
+    onExclude: (Txn) -> Unit,
+    onAssignCard: (Txn, Card) -> Unit,
+    onAddManual: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val pending = txns.filter { it.status == TxStatus.PENDING }
-    val excluded = txns.filter { it.status == TxStatus.EXCLUDED }
-    val visible = when (tab) {
-        InboxTab.PENDING -> pending
-        InboxTab.ALL -> txns
-        InboxTab.EXCLUDED -> excluded
+    // 탭 숫자도 카드·주기 필터를 따른다. 필터를 걸었는데 숫자만 전체 건수면 사용자가 헷갈린다.
+    fun count(t: InboxTab) =
+        InboxFilter.apply(txns, cards, InboxFilter.Criteria(t, cardFilter, thisCycleOnly), limitCycleStartDay).size
+    val visible = remember(txns, cards, tab, cardFilter, thisCycleOnly, limitCycleStartDay) {
+        InboxFilter.apply(txns, cards, InboxFilter.Criteria(tab, cardFilter, thisCycleOnly), limitCycleStartDay)
     }
     val cardNames = cards.associate { it.id to it.nickname }
+    var assigning by remember { mutableStateOf<Txn?>(null) }
 
     LazyColumn(modifier.fillMaxWidth()) {
         item {
@@ -84,14 +103,18 @@ fun InboxScreen(
             ) {
                 SectionLabel("거래 결과함")
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    when (tab) {
-                        InboxTab.PENDING -> "확인 필요"
-                        InboxTab.ALL -> "모든 거래"
-                        InboxTab.EXCLUDED -> "제외된 거래"
-                    },
-                    style = DsType.h2,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        when (tab) {
+                            InboxTab.PENDING -> "확인 필요"
+                            InboxTab.ALL -> "모든 거래"
+                            InboxTab.EXCLUDED -> "제외된 거래"
+                        },
+                        style = DsType.h2,
+                        modifier = Modifier.weight(1f),
+                    )
+                    DsTextButton("+ 직접 입력", onAddManual)
+                }
             }
         }
 
@@ -106,12 +129,37 @@ fun InboxScreen(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 DsChip(
-                    label = "확인 필요 ${pending.size}",
+                    label = "확인 필요만 ${count(InboxTab.PENDING)}",
                     selected = tab == InboxTab.PENDING,
                     onClick = { onSelectTab(InboxTab.PENDING) },
                 )
-                DsChip("전체 ${txns.size}", tab == InboxTab.ALL, onClick = { onSelectTab(InboxTab.ALL) })
+                DsChip("전체 ${count(InboxTab.ALL)}", tab == InboxTab.ALL, onClick = { onSelectTab(InboxTab.ALL) })
                 DsChip("제외됨", tab == InboxTab.EXCLUDED, onClick = { onSelectTab(InboxTab.EXCLUDED) })
+            }
+        }
+
+        // 카드 필터 + 이번 주기만. 카드를 여러 장 쓰면 전체 목록에서 확인할 거래를 찾기 어렵다.
+        item {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(start = Ds.screenPadding, end = Ds.screenPadding, bottom = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                DsChip("이번 주기만", thisCycleOnly, onClick = onToggleThisCycle, pill = false)
+                Box(Modifier.width(1.dp).height(24.dp).background(Ds.line))
+                DsChip("모든 카드", cardFilter == null, onClick = { onSelectCard(null) }, pill = false)
+                cards.forEach { card ->
+                    DsChip(card.nickname, cardFilter == card.id, onClick = { onSelectCard(card.id) }, pill = false)
+                }
+                DsChip(
+                    "미분류",
+                    cardFilter == InboxFilter.UNASSIGNED,
+                    onClick = { onSelectCard(InboxFilter.UNASSIGNED) },
+                    pill = false,
+                )
             }
         }
 
@@ -119,16 +167,39 @@ fun InboxScreen(
             item { EmptyInbox() }
         } else {
             items(visible, key = { it.id }) { txn ->
-                TxnRow(txn, cardNames[txn.cardId]) { onOpenTxn(txn) }
+                TxnRow(
+                    txn = txn,
+                    cardName = cardNames[txn.cardId],
+                    onClick = { onOpenTxn(txn) },
+                    onConfirm = { onConfirm(txn) },
+                    onExclude = { onExclude(txn) },
+                    onAssign = { assigning = txn },
+                )
             }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
     }
+
+    assigning?.let { txn ->
+        CardPickerDialog(
+            cards = cards,
+            selectedId = txn.cardId,
+            onDismiss = { assigning = null },
+            onPick = { card -> onAssignCard(txn, card) },
+        )
+    }
 }
 
 @Composable
-private fun TxnRow(txn: Txn, cardName: String?, onClick: () -> Unit) {
+private fun TxnRow(
+    txn: Txn,
+    cardName: String?,
+    onClick: () -> Unit,
+    onConfirm: () -> Unit,
+    onExclude: () -> Unit,
+    onAssign: () -> Unit,
+) {
     val meta = statusMeta(txn)
     Column {
         Row(
@@ -191,6 +262,17 @@ private fun TxnRow(txn: Txn, cardName: String?, onClick: () -> Unit) {
                         }
                     }
                 }
+
+                // 확인 필요 거래는 목록에서 바로 처리한다. 상세까지 들어가는 한 단계가 쌓이면 확인 대상이 방치된다.
+                // 카드가 없으면 반영 버튼을 숨긴다 - 어느 카드 합계에도 안 들어가 반영해도 의미가 없다.
+                if (txn.status == TxStatus.PENDING) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (txn.cardId != null) QuickAction("반영", Ds.ink, onConfirm)
+                        QuickAction(if (txn.cardId == null) "카드 지정" else "카드 변경", Ds.ink, onAssign)
+                        QuickAction("제외", Ds.accent, onExclude)
+                    }
+                }
             }
         }
         Hairline()
@@ -224,5 +306,18 @@ private fun EmptyInbox() {
             style = DsType.listSecondary.copy(fontSize = 12.5.sp),
             textAlign = TextAlign.Center,
         )
+    }
+}
+
+@Composable
+private fun QuickAction(label: String, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(Ds.radius))
+            .border(Ds.hairline, color, RoundedCornerShape(Ds.radius))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, style = DsType.listPrimary.copy(fontSize = 13.sp, color = color))
     }
 }

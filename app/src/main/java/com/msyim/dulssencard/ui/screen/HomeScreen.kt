@@ -18,6 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.msyim.dulssencard.domain.Times
+import com.msyim.dulssencard.ui.component.AmountEditDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -59,8 +65,14 @@ fun HomeScreen(
     onToggleSort: () -> Unit,
     onCardClick: (Card) -> Unit,
     onOpenSettings: () -> Unit,
+    recentCollection: List<RecentCollection>,
+    lastCollectedByCard: Map<String, Long>,
+    onSetInitialAmount: (Card, Long) -> Unit,
+    onOpenSources: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var editingInitial by remember { mutableStateOf<Aggregator.CardProgress?>(null) }
+
     LazyColumn(modifier.fillMaxWidth()) {
         item { Masthead(daysRemaining = limit.daysRemaining) }
         item { LimitCard(limit, onOpenLimitSettings) }
@@ -77,6 +89,9 @@ fun HomeScreen(
 
         if (collectionGap != CollectionGap.NONE) {
             item { CollectionGapBanner(collectionGap, onOpenSettings) }
+        } else {
+            // 수집 경로가 다 열려 있어도 **실제로 알림이 오고 있는지**는 따로다. 공백을 늦게 알아채지 않게 보여 준다.
+            item { RecentCollectionRow(recentCollection, onOpenSources) }
         }
 
         if (pendingCount > 0) {
@@ -89,7 +104,12 @@ fun HomeScreen(
             item { EmptyCards() }
         } else {
             items(rows, key = { it.card.id }) { row ->
-                CardRow(row) { onCardClick(row.card) }
+                CardRow(
+                    row = row,
+                    lastCollectedAt = lastCollectedByCard[row.card.id],
+                    onClick = { onCardClick(row.card) },
+                    onEditInitial = { editingInitial = row },
+                )
             }
         }
 
@@ -107,6 +127,47 @@ fun HomeScreen(
                 ),
             )
         }
+    }
+
+    editingInitial?.let { row ->
+        AmountEditDialog(
+            title = "${row.card.nickname} 기준액 다시 맞추기",
+            message = "카드사 앱에서 확인한 이번 달 이용금액을 넣으세요. 이 시각 이전 결제는 이 금액에 들어 있다고 봅니다. " +
+                "비워 두고 저장하면 초기 사용액을 끄고 알림만 셉니다.",
+            initial = row.initialApplied,
+            confirmLabel = "저장",
+            allowZero = true,
+            onDismiss = { editingInitial = null },
+            onConfirm = { amount -> onSetInitialAmount(row.card, amount) },
+        )
+    }
+}
+
+/** 홈 '최근 수집' 한 줄의 항목. 알림 소스 이름과 마지막으로 결제를 인식한 시각. */
+data class RecentCollection(val label: String, val lastPaymentAt: Long)
+
+@Composable
+private fun RecentCollectionRow(items: List<RecentCollection>, onOpenSources: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenSources)
+            .padding(horizontal = Ds.screenPadding, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("최근 수집".uppercase(), style = DsType.fieldLabel)
+        Spacer(Modifier.width(10.dp))
+        Text(
+            if (items.isEmpty()) {
+                "아직 결제 알림을 받지 못했습니다"
+            } else {
+                items.take(3).joinToString(" · ") { "${it.label} ${Times.ago(it.lastPaymentAt)}" }
+            },
+            style = DsType.listSecondary.copy(color = if (items.isEmpty()) Ds.accent else Ds.textBody),
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+        )
+        Text("진단 →", style = DsType.listSecondary.copy(color = Ds.textSubtle))
     }
 }
 
@@ -326,7 +387,12 @@ private fun CardSectionHeader(sortByName: Boolean, onToggleSort: () -> Unit) {
 }
 
 @Composable
-private fun CardRow(row: Aggregator.CardProgress, onClick: () -> Unit) {
+private fun CardRow(
+    row: Aggregator.CardProgress,
+    lastCollectedAt: Long?,
+    onClick: () -> Unit,
+    onEditInitial: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -367,16 +433,28 @@ private fun CardRow(row: Aggregator.CardProgress, onClick: () -> Unit) {
         )
 
         Spacer(Modifier.height(8.dp))
-        Text(
-            buildString {
-                append("매월 ${row.card.cycleStartDay}일 시작 · 남은 ${row.daysRemaining}일")
-                // 직접 입력한 몫이 있으면 밝힌다. 숫자의 출처를 알아야 사용자가 다시 맞출 수 있다.
-                if (row.initialApplied != 0L) {
-                    append(" · 직접 입력 ${Money.won(row.initialApplied)} 포함")
-                }
-            },
-            style = DsType.footnote,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                buildString {
+                    append("남은 ${row.daysRemaining}일")
+                    // 직접 입력한 몫이 있으면 밝힌다. 숫자의 출처를 알아야 사용자가 다시 맞출 수 있다.
+                    if (row.initialApplied != 0L) append(" · 기준액 ${Money.won(row.initialApplied)} 포함")
+                    append(" · ")
+                    append(lastCollectedAt?.let { "수집 ${Times.ago(it)}" } ?: "수집 기록 없음")
+                },
+                style = DsType.footnote,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+            )
+            // 카드사 앱 총액이 달라졌을 때 카드 편집까지 들어가지 않고 여기서 바로 맞춘다.
+            Text(
+                "기준액 수정",
+                style = DsType.link.copy(fontSize = 12.sp),
+                modifier = Modifier
+                    .clickable(onClick = onEditInitial)
+                    .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
+            )
+        }
     }
     Hairline()
 }
