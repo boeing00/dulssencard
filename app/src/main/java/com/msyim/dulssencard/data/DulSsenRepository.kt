@@ -114,7 +114,7 @@ class DulSsenRepository private constructor(private val context: Context) {
                     receivedAt = receivedAt,
                     amount = row.amount,
                     currency = "KRW",
-                    foreignAmount = null,
+                    foreignAmountMinor = null,
                     direction = com.msyim.dulssencard.data.model.TxDirection.APPROVAL,
                     status = com.msyim.dulssencard.data.model.TxStatus.PENDING,
                     source = com.msyim.dulssencard.data.model.TxSource.IMAGE,

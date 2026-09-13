@@ -35,7 +35,12 @@ object Aggregator {
     )
 
     /** 통화별 해외 사용 합계. 원화 환산은 하지 않는다. */
-    data class ForeignSpend(val currency: String, val total: Double, val count: Int)
+    data class ForeignSpend(
+        val currency: String,
+        /** 최소 통화 단위 합계. 표시는 [ForeignMoney.format]. */
+        val totalMinor: Long,
+        val count: Int,
+    )
 
     data class LimitProgress(
         val spent: Long,
@@ -155,7 +160,7 @@ object Aggregator {
         return txns
             .filter { txn ->
                 txn.status != TxStatus.EXCLUDED &&
-                    txn.foreignAmount != null &&
+                    txn.foreignAmountMinor != null &&
                     txn.currency.isNotBlank() &&
                     txn.currency != "KRW" &&
                     window.contains(effectiveTime(txn))
@@ -164,8 +169,8 @@ object Aggregator {
             .map { (currency, rows) ->
                 ForeignSpend(
                     currency = currency,
-                    total = rows.sumOf { row ->
-                        val value = row.foreignAmount ?: 0.0
+                    totalMinor = rows.sumOf { row ->
+                        val value = row.foreignAmountMinor ?: 0L
                         if (row.direction == com.msyim.dulssencard.data.model.TxDirection.CANCEL) {
                             -value
                         } else {
@@ -175,8 +180,10 @@ object Aggregator {
                     count = rows.size,
                 )
             }
-            .filter { it.total > 0.0 }
-            .sortedByDescending { it.total }
+            .filter { it.totalMinor > 0L }
+            // 통화 코드순. 금액순은 의미가 없다 — 서로 다른 통화의 크기를 비교할 수 없고,
+            // 최소 단위로 세면 USD 60(6000센트)이 JPY 3,000 보다 "크게" 나오는 엉뚱한 순서가 된다.
+            .sortedBy { it.currency }
     }
 
     /**

@@ -95,6 +95,18 @@ enum class ChangeType {
     RESTORE,
     AMOUNT_MANUAL,
     WIPE,
+
+    /** 취소 거래를 사용자가 원 승인 거래에 직접 연결했다. */
+    LINK_CANCEL,
+
+    /** 사용자가 거래를 손으로 추가했다(현금성 결제·누락된 알림·증감 보정). */
+    MANUAL_ENTRY,
+
+    /** 카드의 초기 사용액을 바꿨다. 거래가 아니라 카드에 걸린 변경이라 transactionId 가 없다. */
+    INITIAL_AMOUNT,
+
+    /** 백업을 가져왔다. */
+    IMPORT_BACKUP,
 }
 
 @Serializable
@@ -124,6 +136,11 @@ data class Card(
     val initialAmountAt: Long = 0L,
     val active: Boolean = true,
     val createdAt: Long = 0L,
+    /**
+     * 사용자가 마지막으로 이 카드 설정을 바꾼 시각.
+     * 백업을 병합할 때 "더 최근에 바꾼 쪽"을 고르는 기준이다. 0 이면 모름(v5 이전 데이터).
+     */
+    val updatedAt: Long = 0L,
 )
 
 /**
@@ -158,10 +175,13 @@ data class Txn(
     val amount: Long,
     val currency: String,
     /**
-     * 해외 승인의 외화 금액. 원화 합계와 섞지 않고 통화별로 따로 보여 준다.
-     * 이 앱은 네트워크를 쓰지 않아 환율을 모르므로 원화 환산은 하지 않는다.
+     * 해외 승인의 외화 금액을 **최소 통화 단위 정수**로 담는다(`USD 42.50` → `4250`).
+     * 원화 합계와 섞지 않고 통화별로 따로 보여 준다 — 환율을 모르므로 환산하지 않는다.
+     *
+     * v4 까지는 Double 이었다. 누적 합계에 부동소수점 오차가 쌓여 v5 에서 바꿨다.
+     * 자릿수는 [com.msyim.dulssencard.domain.ForeignMoney] 가 통화별로 정한다.
      */
-    val foreignAmount: Double? = null,
+    val foreignAmountMinor: Long? = null,
     val direction: TxDirection,
     val status: TxStatus,
     val source: TxSource,
@@ -176,6 +196,11 @@ data class Txn(
     val issuerKey: String?,
     val installment: Boolean,
     val overseas: Boolean,
+    /**
+     * 이 거래가 마지막으로 바뀐 시각(수집 또는 사용자 보정).
+     * 백업을 병합할 때 같은 결제의 두 사본 중 최근 것을 고르는 기준이다. 0 이면 모름(v5 이전 데이터).
+     */
+    val updatedAt: Long = 0L,
 ) {
     /** 합계에 더할 부호 있는 금액. 취소는 차감한다. */
     val signedAmount: Long
@@ -208,6 +233,20 @@ data class SourceApp(
     val issuerKey: String?,
     val enabled: Boolean,
     val lastSeenAt: Long,
+    /**
+     * 이 앱의 알림에서 결제를 마지막으로 인식한 시각. 0 이면 아직 없음.
+     * 홈의 "최근 수집" 표시와, 수집이 멈춘 것을 사용자가 스스로 알아채게 하는 데 쓴다.
+     */
+    val lastPaymentAt: Long = 0L,
+    /** [countsSince] 이후 결제로 인식한 알림 수(중복 포함). */
+    val recognizedCount: Int = 0,
+    /**
+     * [countsSince] 이후 결제처럼 보이는데 읽지 못한 알림 수.
+     * 카드사가 문구를 바꾸면 여기가 먼저 올라간다. 알림 **내용**은 남기지 않고 개수만 센다.
+     */
+    val failedCount: Int = 0,
+    /** 위 두 카운터를 센 시작 시각. 일주일이 지나면 0부터 다시 센다. */
+    val countsSince: Long = 0L,
 )
 
 /** 키-값 설정. 한도·정렬·온보딩 완료 여부처럼 작고 반응형이어야 하는 값만 담는다. */
@@ -216,6 +255,8 @@ data class SourceApp(
 data class Setting(
     @PrimaryKey val key: String,
     val value: String,
+    /** 마지막으로 바꾼 시각. 백업 병합에서 최근 값을 고르는 기준이다. 0 이면 모름. */
+    val updatedAt: Long = 0L,
 )
 
 /** 마감된 주기의 스냅샷. 주기가 넘어갈 때 합계를 얼려 둔다. */

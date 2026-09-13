@@ -318,4 +318,8 @@ private fun changeLabel(adjustment: Adjustment): String = when (adjustment.chang
     com.msyim.dulssencard.data.model.ChangeType.RESTORE -> "제외 복원"
     com.msyim.dulssencard.data.model.ChangeType.AMOUNT_MANUAL -> "금액 수동 보정"
     com.msyim.dulssencard.data.model.ChangeType.WIPE -> "데이터 삭제"
+    com.msyim.dulssencard.data.model.ChangeType.LINK_CANCEL -> "원 승인 거래에 연결"
+    com.msyim.dulssencard.data.model.ChangeType.MANUAL_ENTRY -> "직접 입력"
+    com.msyim.dulssencard.data.model.ChangeType.INITIAL_AMOUNT -> "초기 사용액 변경"
+    com.msyim.dulssencard.data.model.ChangeType.IMPORT_BACKUP -> "백업에서 가져옴"
 }
