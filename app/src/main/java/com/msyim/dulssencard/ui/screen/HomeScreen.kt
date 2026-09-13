@@ -267,7 +267,7 @@ private fun ForeignSpendRow(items: List<Aggregator.ForeignSpend>) {
         items.forEach { item ->
             Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
                 Text(
-                    "${item.currency} ${"%,.2f".format(item.total)}",
+                    "${item.currency} ${com.msyim.dulssencard.domain.ForeignMoney.format(item.totalMinor, item.currency)}",
                     style = DsType.monoSmall.copy(fontSize = 13.sp, color = Ds.ink),
                     modifier = Modifier.weight(1f),
                 )

@@ -62,7 +62,7 @@ class InitialAmountTest {
         receivedAt = occurredAt,
         amount = amount,
         currency = "KRW",
-        foreignAmount = null,
+        foreignAmountMinor = null,
         direction = direction,
         status = status,
         source = TxSource.SMS,

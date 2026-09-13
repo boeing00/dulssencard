@@ -31,7 +31,8 @@ data class ParsedPayment(
     val amount: Long,
     val currency: String,
     /** 해외 승인의 외화 금액. 원화 환산은 하지 않는다(환율을 알 방법이 없다). */
-    val foreignAmount: Double?,
+    /** 외화 금액, 최소 통화 단위. [com.msyim.dulssencard.domain.ForeignMoney] 참고. */
+    val foreignAmountMinor: Long?,
     val occurredAt: Long?,
     /** 문구에 시각이 없어 수신 시각으로 대신했는가. 상세 화면에 '수신 시각 기준'으로 표시한다. */
     val occurredAtEstimated: Boolean,
@@ -160,7 +161,7 @@ object PaymentParser {
 
         val amount = wonAmount ?: 0L
         val currency = if (wonAmount != null) "KRW" else foreignCurrency(foreign) ?: ""
-        val foreignAmount = if (wonAmount == null) foreignValue(foreign) else null
+        val foreignAmountMinor = if (wonAmount == null) foreignMinor(foreign) else null
 
         val parsedTime = extractOccurredAt(haystack, raw.receivedAt)
         // 현대카드 문구처럼 날짜·시각이 아예 없는 형식이 있다. 결제 통지는 결제 직후에 오므로
@@ -216,7 +217,7 @@ object PaymentParser {
             direction = direction,
             amount = amount,
             currency = currency,
-            foreignAmount = foreignAmount,
+            foreignAmountMinor = foreignAmountMinor,
             occurredAt = occurredAt,
             occurredAtEstimated = occurredAtEstimated,
             merchant = merchant,
@@ -295,12 +296,16 @@ object PaymentParser {
      */
     private val BARE_AMOUNT = Regex("""[0-9]{1,3}(?:,[0-9]{3})+|[0-9]{5,9}""")
 
-    /** `USD 12.00` / `12.00 USD` 의 숫자 부분. */
-    private fun foreignValue(match: MatchResult?): Double? {
+    /**
+     * `USD 12.00` / `12.00 USD` 의 숫자 부분을 최소 통화 단위로.
+     * 문자열에서 바로 BigDecimal 로 읽는다 — Double 을 거치면 반올림 경계에서 1센트가 틀어진다.
+     */
+    private fun foreignMinor(match: MatchResult?): Long? {
         if (match == null) return null
         val groups = match.groupValues
         val raw = groups[2].ifEmpty { groups[3] }
-        return raw.replace(",", "").replace(" ", "").toDoubleOrNull()?.takeIf { it > 0.0 }
+        val currency = foreignCurrency(match) ?: return null
+        return com.msyim.dulssencard.domain.ForeignMoney.parseMinor(raw, currency)
     }
 
     private fun foreignCurrency(match: MatchResult?): String? {

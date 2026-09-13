@@ -210,14 +210,15 @@ class BankAndForeignTest {
         requireNotNull(parsed)
         assertTrue(parsed.overseas)
         assertEquals("USD", parsed.currency)
-        assertEquals(42.50, parsed.foreignAmount!!, 0.001)
+        assertEquals("센트 단위 정수로 읽어야 한다", 4_250L, parsed.foreignAmountMinor)
         // 원화 금액은 만들어 내지 않는다 — 환율을 모른다.
         assertEquals(0L, parsed.amount)
     }
 
     private fun foreignTxn(
         currency: String,
-        value: Double,
+        /** 최소 통화 단위. USD 는 센트, JPY 는 엔. */
+        minor: Long,
         direction: TxDirection = TxDirection.APPROVAL,
         status: TxStatus = TxStatus.PENDING,
         occurredAt: Long = at(2026, 9, 7, 12, 0),
@@ -228,7 +229,7 @@ class BankAndForeignTest {
         receivedAt = occurredAt,
         amount = 0L,
         currency = currency,
-        foreignAmount = value,
+        foreignAmountMinor = minor,
         direction = direction,
         status = status,
         source = TxSource.KAKAO,
@@ -248,22 +249,22 @@ class BankAndForeignTest {
     @Test
     fun `해외 사용을 통화별로 따로 센다`() {
         val txns = listOf(
-            foreignTxn("USD", 42.50),
-            foreignTxn("USD", 17.50),
-            foreignTxn("JPY", 3_000.0),
+            foreignTxn("USD", 4_250),
+            foreignTxn("USD", 1_750),
+            foreignTxn("JPY", 3_000),
         )
         val spend = Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now)
         assertEquals(2, spend.size)
         assertEquals("JPY", spend[0].currency)
-        assertEquals(3_000.0, spend[0].total, 0.001)
+        assertEquals(3_000L, spend[0].totalMinor)
         assertEquals("USD", spend[1].currency)
-        assertEquals(60.0, spend[1].total, 0.001)
+        assertEquals("USD 60.00 = 6000센트", 6_000L, spend[1].totalMinor)
         assertEquals(2, spend[1].count)
     }
 
     @Test
     fun `해외 사용은 원화 한도 합계에 섞이지 않는다`() {
-        val txns = listOf(foreignTxn("USD", 100.0))
+        val txns = listOf(foreignTxn("USD", 10_000))
         val limit = Aggregator.limitProgress(1_000_000, 1, txns, now)
         assertEquals(0L, limit.spent)
     }
@@ -271,26 +272,33 @@ class BankAndForeignTest {
     @Test
     fun `해외 취소는 차감한다`() {
         val txns = listOf(
-            foreignTxn("USD", 50.0),
-            foreignTxn("USD", 20.0, direction = TxDirection.CANCEL),
+            foreignTxn("USD", 5_000),
+            foreignTxn("USD", 2_000, direction = TxDirection.CANCEL),
         )
         val spend = Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now)
-        assertEquals(30.0, spend.single().total, 0.001)
+        assertEquals(3_000L, spend.single().totalMinor)
     }
 
     @Test
     fun `제외 처리한 해외 거래는 세지 않는다`() {
         val txns = listOf(
-            foreignTxn("USD", 50.0),
-            foreignTxn("USD", 90.0, status = TxStatus.EXCLUDED),
+            foreignTxn("USD", 5_000),
+            foreignTxn("USD", 9_000, status = TxStatus.EXCLUDED),
         )
         val spend = Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now)
-        assertEquals(50.0, spend.single().total, 0.001)
+        assertEquals(5_000L, spend.single().totalMinor)
     }
 
     @Test
     fun `지난 주기의 해외 거래는 이번 주기에 세지 않는다`() {
-        val txns = listOf(foreignTxn("USD", 50.0, occurredAt = at(2026, 8, 20, 12, 0)))
+        val txns = listOf(foreignTxn("USD", 5_000, occurredAt = at(2026, 8, 20, 12, 0)))
         assertTrue(Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now).isEmpty())
+    }
+
+    @Test
+    fun `외화 합계에 부동소수점 오차가 쌓이지 않는다`() {
+        // Double 로 0.10 을 열 번 더하면 0.9999999999999999 가 된다. 센트 정수로는 정확히 1.00 이다.
+        val txns = List(10) { foreignTxn("USD", 10) }
+        assertEquals(100L, Aggregator.foreignSpend(txns, limitCycleStartDay = 1, now = now).single().totalMinor)
     }
 }
