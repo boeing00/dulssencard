@@ -144,6 +144,23 @@ object PaymentParser {
     /** 카드 문구에 정상적으로 나오는 말. 은행 거래 판정에서 제외한다. */
     private val SAFE_COMPOUNDS = listOf("누적금액", "누적", "실적", "결제금액", "승인금액")
 
+    /**
+     * 파서가 못 읽었지만 **결제 통지처럼 보이는가.** 알림 소스 진단의 '실패' 카운터에만 쓴다.
+     *
+     * 결제와 무관한 알림(카카오톡 대화·광고)을 실패로 세면 숫자가 의미를 잃는다.
+     * 그래서 보수적으로 본다 — 카드사(또는 '카드') + 승인·취소·결제 단어 + 금액 모양이 **모두** 있어야 한다.
+     * 카드사가 문구 형식을 바꾸면 이 조건은 맞는데 [parse] 는 실패하므로 여기가 먼저 올라간다.
+     */
+    fun looksLikePayment(title: String?, body: String): Boolean {
+        val text = listOfNotNull(title, body).joinToString(separator = "\n")
+        val issuer = IssuerRegistry.detect(title, body) != null || text.contains("카드")
+        val word = PAYMENT_WORDS.any { text.contains(it) }
+        val amount = WON_AMOUNT.containsMatchIn(text) || FOREIGN_AMOUNT.containsMatchIn(text)
+        return issuer && word && amount
+    }
+
+    private val PAYMENT_WORDS = listOf("승인", "취소", "결제", "출금")
+
     fun parse(raw: RawMessage): ParsedPayment? {
         val body = raw.body.trim()
         if (body.isEmpty()) return null

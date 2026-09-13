@@ -599,9 +599,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 ),
             )
         ) {
-            is Ingestor.Outcome.Insert -> Ingested.INSERTED
-            is Ingestor.Outcome.Duplicate -> Ingested.DUPLICATE
-            Ingestor.Outcome.NotAPayment -> Ingested.NOT_A_PAYMENT
+            // 저장소가 삽입 반환값까지 확인한 결과다. 경합에서 진 삽입은 DUPLICATE 로 온다.
+            is DulSsenRepository.IngestResult.Inserted -> Ingested.INSERTED
+            is DulSsenRepository.IngestResult.Duplicate -> Ingested.DUPLICATE
+            is DulSsenRepository.IngestResult.NotAPayment -> Ingested.NOT_A_PAYMENT
         }
 
     /**

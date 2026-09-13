@@ -69,6 +69,33 @@ interface TxnDao {
     )
     suspend fun findCancelOrigin(amount: Long, issuerKey: String?, before: Long): Txn?
 
+    /**
+     * 연결에 실패한 취소 거래의 **원 승인 거래 후보**. 사용자가 직접 고르게 보여 준다.
+     *
+     * 자동 연결([findCancelOrigin])보다 넓게 잡는다 — 카드사가 달라도, 금액이 커도(부분 취소) 보인다.
+     * 취소 시각 이전의 승인만, 이미 다른 취소에 묶인 것은 빼고, 같은 금액을 먼저 최근 순으로.
+     */
+    @Query(
+        """
+        SELECT * FROM txns
+        WHERE direction = 'APPROVAL'
+          AND amount >= :amount
+          AND COALESCE(occurredAt, receivedAt) <= :before
+          AND id != :cancelId
+          AND id NOT IN (
+              SELECT relatedTransactionId FROM txns
+              WHERE relatedTransactionId IS NOT NULL AND id != :cancelId
+          )
+        ORDER BY (amount = :amount) DESC, COALESCE(occurredAt, receivedAt) DESC
+        LIMIT 30
+        """,
+    )
+    suspend fun cancelCandidates(amount: Long, before: Long, cancelId: String): List<Txn>
+
+    /**
+     * 지문 유니크 인덱스에 걸리면 조용히 무시한다. **반환값이 -1 이면 들어가지 않은 것이다** —
+     * 호출자는 반드시 확인해야 한다. 확인하지 않으면 경합에서 진 쪽을 "추가됨"으로 알린다.
+     */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertIgnoringDuplicates(txn: Txn): Long
 
@@ -99,6 +126,9 @@ interface AdjustmentDao {
     @Insert
     suspend fun insert(adjustment: Adjustment)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIgnoring(adjustment: Adjustment): Long
+
     @Upsert
     suspend fun upsert(adjustment: Adjustment)
 
@@ -113,6 +143,9 @@ interface SettingDao {
 
     @Query("SELECT value FROM settings WHERE key = :key")
     suspend fun get(key: String): String?
+
+    @Query("SELECT * FROM settings")
+    suspend fun all(): List<Setting>
 
     @Upsert
     suspend fun put(setting: Setting)
@@ -159,6 +192,9 @@ interface SourceAppDao {
 interface CycleSnapshotDao {
     @Query("SELECT * FROM cycle_snapshots ORDER BY closedAt DESC")
     fun observeAll(): Flow<List<CycleSnapshot>>
+
+    @Query("SELECT * FROM cycle_snapshots ORDER BY closedAt DESC")
+    suspend fun all(): List<CycleSnapshot>
 
     @Upsert
     suspend fun upsert(snapshot: CycleSnapshot)
