@@ -472,6 +472,92 @@ class DulSsenRepository @VisibleForTesting internal constructor(
         snapshot.cycleSnapshots.forEach { db.cycleSnapshotDao().upsert(it) }
     }
 
+    // ---------------------------------------------------------------- 백업
+
+    /** 백업에 담을 현재 데이터. 한 트랜잭션에서 읽어 표끼리 어긋난 순간을 담지 않는다. */
+    suspend fun readForBackup(): com.msyim.dulssencard.backup.ImportPlanner.Local = atomically {
+        com.msyim.dulssencard.backup.ImportPlanner.Local(
+            cards = db.cardDao().all(),
+            txns = db.txnDao().all(),
+            adjustments = db.adjustmentDao().all(),
+            settings = db.settingDao().all(),
+            cycleSnapshots = db.cycleSnapshotDao().all(),
+            sourceApps = db.sourceAppDao().all(),
+        )
+    }
+
+    /**
+     * 가져오기 계획을 적용한다. **전부 한 트랜잭션** — 중간에 하나라도 실패하면 아무것도 바뀌지 않는다.
+     *
+     * `@Upsert` 는 지문 유니크 인덱스에 걸리면 조용히 0행 갱신으로 끝날 수 있다. 계획기가 그런 경우를
+     * 만들지 않지만, 만약을 위해 **쓴 거래가 실제로 있는지 트랜잭션 안에서 확인**하고 없으면 예외로
+     * 전체를 되돌린다. 조용히 빠진 거래는 사용자가 절대 알아챌 수 없기 때문이다.
+     */
+    suspend fun applyImport(
+        plan: com.msyim.dulssencard.backup.ImportPlanner.Plan,
+        now: Long = System.currentTimeMillis(),
+    ) = atomically { writePlan(plan, now) }
+
+    /**
+     * 가져오기를 **처음부터 끝까지 한 트랜잭션**으로 한다: 현재 데이터 읽기 → [beforeApply](자동 백업) →
+     * 계획 → 적용.
+     *
+     * 미리보기 때 세운 계획을 그대로 쓰지 않고 여기서 다시 세운다. 미리보기를 보는 사이에 결제 알림이
+     * 들어왔을 수 있다 — 그 거래가 자동 백업에서도, 병합 판정에서도 빠지면 조용히 사라진다.
+     * 자동 백업이 실패하면 예외가 나서 아무것도 적용되지 않는다.
+     */
+    suspend fun importAtomically(
+        backup: com.msyim.dulssencard.backup.BackupPayload,
+        mode: com.msyim.dulssencard.backup.ImportPlanner.Mode,
+        now: Long = System.currentTimeMillis(),
+        beforeApply: suspend (com.msyim.dulssencard.backup.ImportPlanner.Local) -> Unit,
+    ): com.msyim.dulssencard.backup.ImportPlanner.Plan = atomically {
+        val local = readForBackup()
+        beforeApply(local)
+        checkpoint("import:afterAutoBackup")
+        val plan = com.msyim.dulssencard.backup.ImportPlanner.plan(local, backup, mode)
+        writePlan(plan, now)
+        plan
+    }
+
+    private suspend fun writePlan(plan: com.msyim.dulssencard.backup.ImportPlanner.Plan, now: Long) {
+        if (plan.clearFirst) {
+            db.txnDao().clear()
+            db.cardDao().clear()
+            db.adjustmentDao().clear()
+            db.settingDao().clear()
+            db.cycleSnapshotDao().clear()
+        }
+        checkpoint("applyImport:afterClear")
+        plan.cards.forEach { db.cardDao().upsert(it) }
+        plan.txns.forEach { db.txnDao().upsert(it) }
+        checkpoint("applyImport:afterTxns")
+        plan.adjustments.forEach { db.adjustmentDao().insertIgnoring(it) }
+        plan.settings.forEach { db.settingDao().put(it) }
+        plan.cycleSnapshots.forEach { db.cycleSnapshotDao().upsert(it) }
+        plan.sourceApps.forEach { db.sourceAppDao().upsert(it) }
+
+        plan.txns.forEach { written ->
+            val row = db.txnDao().byId(written.id)
+            check(row != null && row.messageFingerprint == written.messageFingerprint) {
+                "가져온 거래가 반영되지 않았다(지문 충돌). 전체를 되돌린다."
+            }
+        }
+
+        val s = plan.summary
+        db.adjustmentDao().insert(
+            Adjustment(
+                id = UUID.randomUUID().toString(),
+                transactionId = null,
+                changeType = ChangeType.IMPORT_BACKUP,
+                beforeState = "mode=${plan.mode}",
+                afterState = "cards+${s.cardsAdded}~${s.cardsUpdated} txns+${s.txnsAdded}~${s.txnsUpdated}",
+                reason = null,
+                createdAt = now,
+            ),
+        )
+    }
+
     // ---------------------------------------------------------------- 설정
 
     suspend fun putSetting(key: String, value: String, now: Long = System.currentTimeMillis()) =

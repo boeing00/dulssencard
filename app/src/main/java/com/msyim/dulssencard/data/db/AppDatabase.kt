@@ -26,7 +26,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         SourceApp::class,
         CycleSnapshot::class,
     ],
-    version = 5,
+    version = AppDatabase.SCHEMA_VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -40,6 +40,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     companion object {
         const val DB_NAME = "dulssencard.db"
+
+        /** 현재 스키마 버전. 백업 파일에 적어 두고, 더 새 앱이 만든 백업은 열지 않는 데 쓴다. */
+        const val SCHEMA_VERSION = 5
 
         /**
          * 시각 추정 플래그 추가.
