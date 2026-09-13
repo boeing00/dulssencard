@@ -34,9 +34,10 @@
 
 - 패키지: `com.msyim.dulssencard` (디버그는 `.debug` 접미사)
 - 버전: `0.1.0` / versionCode 1 · minSdk 26 · compileSdk·targetSdk 37
-- APK: debug 67.8MB / release 50.9MB (대부분 ML Kit 한국어 OCR 모델)
-- 테스트: **125개 전부 통과** (2026-09-08 기준)
-- git: `73a8b1e P0 구현` 이 첫 커밋. 브랜치 `master`
+- APK: release 51.0MB (대부분 ML Kit 한국어 OCR 모델, BouncyCastle 은 R8 후 +0.1MB)
+- DB 스키마: **v5** (`AppDatabase.SCHEMA_VERSION`)
+- 테스트: **241개 전부 통과** (2026-09-13 기준), lint 오류 0
+- git: `main`, 원격 `boeing00/dulssencard` (**공개**) — §11 의 개인정보 이력 문제를 먼저 볼 것
 
 ---
 
@@ -88,7 +89,7 @@ cd /c/Users/moons/AndroidStudioProjects/dulssencard
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 ADB="C:/Users/moons/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
-./gradlew :app:testDebugUnitTest        # 125개, 기기 없이 돈다
+./gradlew :app:testDebugUnitTest        # 241개, 기기 없이 돈다(Robolectric 포함)
 ./gradlew :app:assembleDebug
 "$ADB" -s R3CX50262WD install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -163,7 +164,7 @@ adb shell cmd notification allow_listener com.msyim.dulssencard.debug/com.msyim.
 
 ---
 
-## 4. 초기 사용액(`initialAmount`) — **확정 사양, 구현 대기** (2026-09-08)
+## 4. 초기 사용액(`initialAmount`) — 구현됨 (2026-09-08 결정)
 
 ### 왜 이렇게 정했나
 
@@ -281,37 +282,31 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 
 ## 7. 다음에 할 일
 
-### 순서대로
+### 사용자 결정이 필요한 것
 
-1. [x] `git init` + 첫 커밋 (`73a8b1e P0 구현`) — 완료
-2. [ ] **`initialAmount` 구현** (§4). 테스트 → 모델·마이그레이션 → `Aggregator` → 화면 순서.
-       **주기 넘어갈 때 0이 되는 것**을 테스트로 먼저 잠글 것.
-3. [ ] 홈의 주 경로를 `initialAmount` 로 바꾸고 캡처 불러오기는 설정으로 물린다.
-4. [ ] 실기기에서 한 주기 써 보고, OCR 제거 여부를 그때 판단한다.
+1. [ ] **공개 저장소 이력의 실제 개인정보** — §11. 이력 재작성(force push) 또는 저장소 비공개 전환.
+2. [ ] 초기 사용액을 **개인 구매 한도에도** 넣을지 — 지금은 카드 진행률에만 넣는다(주기 시작일이 달라서).
 
 ### 아직 확인 못 한 것
 
 - [ ] 카드사 **앱 푸시**의 실제 문구 — 알림톡·문자는 확보했지만 푸시는 아직 못 봤다.
-      개시 잔액으로 바꿔도 **통지 파싱은 그대로 핵심 경로**라 이건 여전히 중요하다.
+      실측 문구는 `src/test/resources/corpus/` 에 **익명화해서** 파일로 더한다.
 - [ ] 롯데·BC 등 코퍼스에 없는 카드사의 최신 문구
 - [ ] `IssuerRegistry` 패키지명 기기 재확인 (NH농협은 `nh.smart.banking` 만 실측)
-- [ ] 카드 등록 후 자동 반영·취소 차감이 실제 문자로 도는지
-- [ ] (OCR 을 남기기로 할 경우에만) 우리카드 실적 내역 조회 화면 반입
+- [ ] **실기기(S24+)에서** v4 → v5 업그레이드 · 백업 왕복. 에뮬레이터에서는 확인했다(§12)
+- [ ] 한 주기 실사용 후 OCR 제거 여부 판단 (§4)
 
 ### 출시 전
 
 - [ ] `keystore.properties` + 서명 키 — **위임 금지, 사용자와 직접**
 - [x] 런처 아이콘 — 완료. **다시 만들 때 Image Asset 마법사를 쓰지 말 것.**
-      아트가 가장자리까지 꽉 차 있어 마법사 결과물은 adaptive icon 가시영역 밖으로
-      글자 양끝과 고양이 얼굴이 잘린다. `python store/make_icons.py` 로 다시 뽑는다
-      (배경 키잉 + 36dp 원 안에 들어가도록 스케일 계산). Play 512px 은 `store/ic_playstore_512.png`
+      `python store/make_icons.py` 로 다시 뽑는다. Play 512px 은 `store/ic_playstore_512.png`
 - [ ] Play 심사 자료: 알림 접근의 핵심 기능성 · 허용 목록 · 미전송 (`README.md` §5)
-- [ ] 개인정보처리방침 · 데이터 안전성 섹션
+- [ ] 개인정보처리방침 · 데이터 안전성 섹션 (백업 파일은 사용자가 고른 위치에만 쓴다는 점 포함)
 
-### P1 (PRD 에 있으나 미착수)
+### P1 (남은 것)
 
-암호화 내보내기/가져오기, Drive 백업, 카드사별 파서 템플릿.
-(PRD 의 '최근 14일 재스캔'은 `READ_SMS` 가 필요해 폐기했다 — 그 자리를 §4 개시 잔액이 대신한다.)
+Drive 백업(네트워크 권한이 생긴다 — §1① 과 충돌, 사용자 결정 필요), 카드사별 파서 템플릿.
 
 ---
 
@@ -358,3 +353,60 @@ PRD 와 이 문서가 어긋나면 **PRD 가 무엇을·이 문서가 어떻게*
 이 프로젝트 버그의 대부분이다.
 
 항공 계산 로직·릴리스 서명·API 키 관련은 다른 프로젝트 포함해 **위임 금지**다.
+
+---
+
+## 11. 공개 저장소 이력에 남은 개인정보 (2026-09-13, **미해결**)
+
+저장소를 공개로 올리기 전 익명화에서 빠진 것이 있었다. 우리카드 항목만 목록으로 찾다가
+삼성카드 알림톡 실측 블록과 광고 배너 OCR 줄을 놓쳤다:
+
+- 가리지 않은 실명(우리WON피드 광고 배너 OCR 줄), 가족카드 사용자 가린 이름
+- 삼성 가족카드·본인카드 뒷자리 두 개, 실제 가맹점 두 곳과 누적액, 은행 환전 금액
+
+작업 트리에서는 `b1a4b37` 에서 지웠다. **그러나 그 이전 커밋들이 이미 `origin/main` 에 있다.**
+해결하려면 이력을 새로 쓰고 force push 하거나, 저장소를 비공개로 돌려야 한다. 둘 다 되돌리기
+어려운 외부 조치라 사용자 확인 없이 하지 않았다.
+
+**재발 방지**: `AnonymizationGuardTest` 가 테스트·코퍼스·소스·README·CLAUDE.md 를 훑어 허용 목록 밖의
+가린 이름·카드 뒷자리·전화번호·주민번호가 보이면 실패한다. **가리지 않은 실명·실제 가맹점은 못 잡는다** —
+코퍼스를 더할 때 `corpus/README.md` 표대로 눈으로 바꿀 것.
+
+---
+
+## 12. 2026-09-13 작업에서 밟은 함정
+
+### 코드
+
+| 함정 | 증상 | 지금 |
+|---|---|---|
+| **직접 쓴 SQL INSERT** (`SourceAppDao.touch`) | v5 컬럼을 안 채워 **새 설치 기기에서 알림마다 앱이 죽음**. 마이그레이션한 DB 는 `DEFAULT 0` 이라 기존 사용자로는 재현 안 됨 | 모든 컬럼 명시 + 신규 컬럼 `@ColumnInfo(defaultValue)` + `SourceAppDaoTest`(새 설치 스키마) |
+| 엔티티에 `defaultValue` 를 **옛 컬럼에 추가** | 그 컬럼을 기본값 없이 만든 기존 사용자 DB 에서 Room 검증 실패 → 업그레이드 시 크래시 | v5 신규 컬럼에만 넣었다. 옛 컬럼에 넣지 말 것 |
+| `MigrationTestHelper` on **Windows** | androidx.sqlite 2.8.4 `SupportSQLiteDriver` 가 경로를 `/` 로만 잘라 이름 비교 → 전부 실패 | `MigrationTest` 가 스키마 JSON 으로 과거 DB 를 직접 만들고 `Room.databaseBuilder` 로 연다 |
+| `insertIgnoringDuplicates` 반환값 무시 | 경합에서 진 삽입을 "추가됨"으로 알림 | 저장소가 -1 을 보고 `IngestResult.Duplicate` |
+| 되돌리기(`restore`)에 트랜잭션 없음 | 표를 비운 직후 죽으면 데이터 전부 소실 | 모든 다단계 쓰기 `atomically { }` + 고장 주입 테스트 |
+| `@Upsert` 와 유니크 인덱스 | 다른 id 로 같은 지문을 upsert 하면 조용히 0행 | 백업 적용 후 쓴 행을 트랜잭션 안에서 확인, 없으면 롤백 |
+| 알림 시각(분) vs 기준 시각(밀리초) | 기준을 넣은 **그 분의 결제**가 기준 이전으로 빠짐 | `Aggregator.isAfterInitialBaseline` — 분 단위 시각은 그 분의 끝 |
+| 숫자 상태로 든 입력칸 | 지운 칸을 표현 못 해 `1`→`3` 이 `31`→ 28 로 잘림 | 입력 문자열을 따로 든다 |
+| `DsTextButton` 을 한 줄 안에 | 가로를 다 차지해 옆 제목이 세로로 한 글자씩 깨짐 | 한 줄에는 `InlineLink` |
+| `BackHandler` 없음 | 하위 화면에서 뒤로가기 = 앱 종료 | `DulSsenApp` 에서 화면별 처리 |
+
+### 도구
+
+- **Python 스크립트를 bash heredoc 으로 넘기지 말 것.** `\n`·`\u0000` 이 실제 줄바꿈·NUL 바이트로 바뀌어
+  Kotlin 파일이 깨진다(실제로 NUL 이 소스에 박혀 grep 이 파일을 바이너리로 취급했다). 패치는 Write 도구로
+  `.py` 파일을 만든 뒤 실행하거나 Edit 도구를 쓴다.
+- **에뮬레이터 시계는 UTC**, 앱은 Asia/Seoul 로 해석한다. 테스트 문자에 기기 `date` 를 그대로 넣으면
+  9시간 어긋나 "결제가 안 더해진다"는 가짜 버그를 본다. 한국 시각으로 만들어 보낼 것:
+  `python -c "import datetime; print((datetime.datetime.now(datetime.UTC)+datetime.timedelta(hours=9)).strftime('%m/%d %H:%M'))"`
+- adb `input text` 로 한글은 안 들어간다. 카드 키워드는 뒷자리 숫자(`1234`)로 테스트한다.
+- 화면 확인은 `uiautomator dump` 로 글자·좌표를 읽고 누른다. 실기기 스크린샷은 찍지 않는다(키보드 제안줄에
+  개인정보가 찍힌 적이 있다). 깨끗한 에뮬레이터는 괜찮다.
+
+### 백업 형식 요약 (자세한 건 `backup/BackupCrypto.kt` 머리 주석)
+
+- `DSCB` v1: 헤더(매직·버전·키 종류·Argon2id 64MiB/3회/병렬1·솔트16·IV12) + AES-256-GCM. **헤더 전체가 AAD.**
+- 키 종류 1 = 비밀번호(내보내기), 2 = Android Keystore(복원 전 자동 백업, 이 기기 전용, `filesDir/auto-backups`, 최근 3개)
+- 파라미터 상한(256MiB·10회·병렬4)·파일 64MB 상한을 **키 유도 전에** 검사. 한글 비밀번호 NFC 정규화.
+- BouncyCastle Argon2id 배선은 RFC 9106 공식 벡터로 테스트한다(`BackupCryptoTest`).
+- 충돌 정책은 `backup/ImportPlanner.kt` 머리 주석. 거래는 **지문**으로 같은 결제 판정, `updatedAt` 최신 우선·동률 로컬.
