@@ -208,6 +208,8 @@ private fun ScreenContent(
                 val filtered = state.inboxCardFilter?.takeIf { it != InboxFilter.UNASSIGNED }
                 viewModel.openManualEntry(filtered, Screen.INBOX)
             },
+            onRestore = viewModel::restoreTxn,
+            onDelete = viewModel::deleteExcluded,
         )
 
         Screen.DETAIL -> {
@@ -236,6 +238,7 @@ private fun ScreenContent(
                     onPickOrigin = { origin -> viewModel.linkCancel(txn, origin) },
                     onDismissCandidates = viewModel::clearCancelCandidates,
                     onOpenTxn = { viewModel.openTxn(it.id, state.backTo) },
+                    onDelete = { viewModel.deleteExcluded(listOf(txn)) },
                 )
             }
         }

@@ -105,6 +105,17 @@ interface TxnDao {
     @Upsert
     suspend fun upsert(txn: Txn)
 
+    /** **제외됨 상태만** 지운다. 합계에 들어간 거래는 조건에 걸리지 않아 지워지지 않는다. */
+    @Query("DELETE FROM txns WHERE id IN (:ids) AND status = 'EXCLUDED'")
+    suspend fun deleteExcluded(ids: List<String>): Int
+
+    /** 지워질 거래를 원 거래로 가리키던 취소의 연결을 끊는다. */
+    @Query("UPDATE txns SET relatedTransactionId = NULL WHERE relatedTransactionId IN (:ids)")
+    suspend fun unlinkFrom(ids: List<String>)
+
+    @Query("SELECT id FROM txns WHERE id IN (:ids) AND status = 'EXCLUDED'")
+    suspend fun excludedIds(ids: List<String>): List<String>
+
     @Query("UPDATE txns SET cardId = NULL, status = 'PENDING', pendingReason = 'NO_CARD_MATCH' WHERE cardId = :cardId")
     suspend fun detachFromCard(cardId: String)
 
@@ -131,6 +142,9 @@ interface AdjustmentDao {
 
     @Upsert
     suspend fun upsert(adjustment: Adjustment)
+
+    @Query("DELETE FROM adjustments WHERE transactionId IN (:txnIds)")
+    suspend fun deleteForTxns(txnIds: List<String>)
 
     @Query("DELETE FROM adjustments")
     suspend fun clear()

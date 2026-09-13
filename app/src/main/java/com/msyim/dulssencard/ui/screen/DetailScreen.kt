@@ -41,6 +41,7 @@ import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ui.component.AmountEditDialog
 import com.msyim.dulssencard.ui.component.DestructiveButton
+import com.msyim.dulssencard.ui.component.DsConfirmDialog
 import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.OutlineButton
 import com.msyim.dulssencard.ui.component.DsChip
@@ -76,10 +77,12 @@ fun DetailScreen(
     onPickOrigin: (Txn) -> Unit,
     onDismissCandidates: () -> Unit,
     onOpenTxn: (Txn) -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val meta = statusMeta(txn)
     var correcting by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val origin = txn.relatedTransactionId?.let { id -> allTxns.firstOrNull { it.id == id } }
     // 이 결제를 취소한 거래. 승인 쪽에서도 "취소됐는지"를 보여 줘야 합계가 왜 줄었는지 안다.
     val cancelledBy = if (txn.direction == TxDirection.APPROVAL) {
@@ -200,12 +203,25 @@ fun DetailScreen(
             ) {
                 if (txn.status == TxStatus.EXCLUDED) {
                     PrimaryButton("제외 복원", onRestore)
+                    DestructiveButton("영구 삭제", { confirmDelete = true })
                 } else {
                     PrimaryButton("집계 확정", onConfirm)
                     DestructiveButton("실적 제외", onExclude)
                 }
             }
         }
+    }
+
+    if (confirmDelete) {
+        DsConfirmDialog(
+            title = "제외한 거래를 삭제할까요?",
+            text = "기기에서 영구히 지웁니다. 합계에는 원래 들어가 있지 않아 숫자는 바뀌지 않습니다. " +
+                "삭제 직후 4.2초 안에는 되돌릴 수 있습니다.",
+            confirmLabel = "삭제",
+            destructive = true,
+            onConfirm = onDelete,
+            onDismiss = { confirmDelete = false },
+        )
     }
 
     if (correcting) {

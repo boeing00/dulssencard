@@ -243,6 +243,62 @@ class RepositoryTransactionTest {
         assertEquals(1, db.txnDao().all().size)
     }
 
+    // ------------------------------------------------------- 제외 거래 삭제
+
+    @Test
+    fun `제외한 거래만 지우고 합계에 들어간 거래는 넘겨도 지우지 않는다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "keep", amount = 10_000)
+        seedTxn(id = "gone", amount = 20_000)
+        val gone = db.txnDao().byId("gone")!!
+        repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
+
+        val deleted = repo.deleteExcludedTxns(listOf("keep", "gone"))
+
+        assertEquals(1, deleted)
+        assertNotNull("합계에 들어간 거래가 지워졌다", db.txnDao().byId("keep"))
+        assertNull(db.txnDao().byId("gone"))
+        assertTrue("지운 거래의 변경 기록이 남았다", db.adjustmentDao().all().none { it.transactionId == "gone" })
+    }
+
+    @Test
+    fun `지운 거래를 가리키던 취소는 연결이 끊긴다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "origin", amount = 20_000)
+        val origin = db.txnDao().byId("origin")!!
+        db.txnDao().update(origin.copy(status = TxStatus.EXCLUDED))
+        db.txnDao().insertIgnoringDuplicates(
+            origin.copy(id = "cancel", direction = TxDirection.CANCEL, status = TxStatus.AUTO,
+                messageFingerprint = "fp-cancel", relatedTransactionId = "origin"),
+        )
+        repo.deleteExcludedTxns(listOf("origin"))
+        assertNull("취소가 없는 거래를 가리킨다", db.txnDao().byId("cancel")!!.relatedTransactionId)
+    }
+
+    @Test
+    fun `삭제 중 죽으면 연결도 기록도 거래도 그대로다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "gone", amount = 20_000)
+        val gone = db.txnDao().byId("gone")!!
+        repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
+        crashAt("deleteExcluded:beforeDelete")
+        expectCrash { repo.deleteExcludedTxns(listOf("gone")) }
+        assertNotNull(db.txnDao().byId("gone"))
+        assertEquals("변경 기록만 사라졌다", 1, db.adjustmentDao().all().size)
+    }
+
+    @Test
+    fun `지운 제외 거래는 되돌리기로 복구된다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "gone", amount = 20_000)
+        val gone = db.txnDao().byId("gone")!!
+        repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
+        val snapshot = repo.snapshot()
+        repo.deleteExcludedTxns(listOf("gone"))
+        repo.restore(snapshot)
+        assertEquals(TxStatus.EXCLUDED, db.txnDao().byId("gone")!!.status)
+    }
+
     // ------------------------------------------------------- 되돌리기의 완전성
 
     @Test

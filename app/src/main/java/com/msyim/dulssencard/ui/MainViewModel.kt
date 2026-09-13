@@ -662,6 +662,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 제외한 거래 영구 삭제. 직후 4.2초 동안 되돌릴 수 있다. 상세 화면에서 지웠으면 목록으로 돌아간다. */
+    fun deleteExcluded(txns: List<Txn>) {
+        viewModelScope.launch {
+            undoSnapshot = repository.snapshot()
+            val deleted = repository.deleteExcludedTxns(txns.map { it.id })
+            if (_state.value.screen == Screen.DETAIL && txns.any { it.id == _state.value.selectedTxnId }) {
+                _state.value = _state.value.copy(screen = Screen.INBOX)
+            }
+            say(
+                if (deleted == 0) "지울 수 있는 제외 거래가 없습니다" else "제외된 거래 ${deleted}건을 삭제했습니다",
+                undoable = deleted > 0,
+            )
+        }
+    }
+
     fun correctAmount(txn: Txn, amount: Long) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()

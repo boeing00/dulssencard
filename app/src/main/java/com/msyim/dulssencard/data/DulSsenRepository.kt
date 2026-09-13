@@ -367,6 +367,25 @@ class DulSsenRepository @VisibleForTesting internal constructor(
         txn
     }
 
+    /**
+     * 제외한 거래를 영구히 지운다. **제외됨 상태가 아닌 거래는 넘겨도 지우지 않는다** — 합계에 들어간
+     * 거래를 실수로 지우면 사용자가 모르는 사이 숫자가 줄어든다. 실제로 지운 건수를 돌려준다.
+     *
+     * 한 트랜잭션에서 세 가지를 함께 한다: 이 거래를 원 거래로 가리키던 취소의 연결 끊기, 이 거래의
+     * 변경 기록 삭제, 거래 삭제. 연결을 안 끊으면 취소가 없는 거래를 가리킨다.
+     *
+     * 지운 결제는 지문도 사라진다. 같은 결제가 들어 있는 백업을 병합하면 다시 들어온다(제외 상태 그대로).
+     */
+    suspend fun deleteExcludedTxns(ids: List<String>): Int = atomically {
+        if (ids.isEmpty()) return@atomically 0
+        val deletable = db.txnDao().excludedIds(ids)
+        if (deletable.isEmpty()) return@atomically 0
+        db.txnDao().unlinkFrom(deletable)
+        db.adjustmentDao().deleteForTxns(deletable)
+        checkpoint("deleteExcluded:beforeDelete")
+        db.txnDao().deleteExcluded(deletable)
+    }
+
     /** 금액 정정. 알림에서 잘못 읽었거나 부분 취소가 반영 안 된 경우. */
     suspend fun correctAmount(txn: Txn, newAmount: Long, now: Long = System.currentTimeMillis()) =
         applyChange(txn, txn.copy(amount = newAmount), ChangeType.AMOUNT_MANUAL, now = now)

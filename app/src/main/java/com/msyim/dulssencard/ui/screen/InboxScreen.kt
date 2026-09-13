@@ -41,6 +41,7 @@ import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ui.InboxFilter
 import com.msyim.dulssencard.ui.InboxTab
 import com.msyim.dulssencard.ui.component.CardPickerDialog
+import com.msyim.dulssencard.ui.component.DsConfirmDialog
 import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.DsChip
 import com.msyim.dulssencard.ui.component.Hairline
@@ -80,6 +81,8 @@ fun InboxScreen(
     onExclude: (Txn) -> Unit,
     onAssignCard: (Txn, Card) -> Unit,
     onAddManual: () -> Unit,
+    onRestore: (Txn) -> Unit,
+    onDelete: (List<Txn>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 탭 숫자도 카드·주기 필터를 따른다. 필터를 걸었는데 숫자만 전체 건수면 사용자가 헷갈린다.
@@ -90,6 +93,8 @@ fun InboxScreen(
     }
     val cardNames = cards.associate { it.id to it.nickname }
     var assigning by remember { mutableStateOf<Txn?>(null) }
+    /** 삭제 확인을 기다리는 거래. 한 건이든 '모두 삭제'든 같은 대화상자를 쓴다. */
+    var deleting by remember { mutableStateOf<List<Txn>?>(null) }
 
     LazyColumn(modifier.fillMaxWidth()) {
         item {
@@ -163,6 +168,24 @@ fun InboxScreen(
             }
         }
 
+        if (tab == InboxTab.EXCLUDED && visible.isNotEmpty()) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = Ds.screenPadding, end = Ds.screenPadding, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "제외한 거래는 어떤 합계에도 들어가지 않습니다.",
+                        style = DsType.listSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    InlineLink("보이는 ${visible.size}건 모두 삭제", { deleting = visible })
+                }
+            }
+        }
+
         if (visible.isEmpty()) {
             item { EmptyInbox() }
         } else {
@@ -174,11 +197,25 @@ fun InboxScreen(
                     onConfirm = { onConfirm(txn) },
                     onExclude = { onExclude(txn) },
                     onAssign = { assigning = txn },
+                    onRestore = { onRestore(txn) },
+                    onDelete = { deleting = listOf(txn) },
                 )
             }
         }
 
         item { Spacer(Modifier.height(24.dp)) }
+    }
+
+    deleting?.let { targets ->
+        DsConfirmDialog(
+            title = if (targets.size == 1) "제외한 거래를 삭제할까요?" else "제외한 거래 ${targets.size}건을 삭제할까요?",
+            text = "기기에서 영구히 지웁니다. 합계에는 원래 들어가 있지 않아 숫자는 바뀌지 않습니다. " +
+                "삭제 직후 4.2초 안에는 되돌릴 수 있습니다.",
+            confirmLabel = "삭제",
+            destructive = true,
+            onConfirm = { onDelete(targets) },
+            onDismiss = { deleting = null },
+        )
     }
 
     assigning?.let { txn ->
@@ -199,6 +236,8 @@ private fun TxnRow(
     onConfirm: () -> Unit,
     onExclude: () -> Unit,
     onAssign: () -> Unit,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val meta = statusMeta(txn)
     Column {
@@ -265,6 +304,15 @@ private fun TxnRow(
 
                 // 확인 필요 거래는 목록에서 바로 처리한다. 상세까지 들어가는 한 단계가 쌓이면 확인 대상이 방치된다.
                 // 카드가 없으면 반영 버튼을 숨긴다 - 어느 카드 합계에도 안 들어가 반영해도 의미가 없다.
+                // 제외한 거래는 '모든 거래'·'제외됨' 어느 탭에서든 목록에서 바로 복원하거나 지운다.
+                if (txn.status == TxStatus.EXCLUDED) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        QuickAction("복원", Ds.ink, onRestore)
+                        QuickAction("삭제", Ds.accent, onDelete)
+                    }
+                }
+
                 if (txn.status == TxStatus.PENDING) {
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
