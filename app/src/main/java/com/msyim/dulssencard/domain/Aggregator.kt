@@ -62,6 +62,27 @@ object Aggregator {
     fun effectiveTime(txn: Txn): Long = txn.occurredAt ?: txn.receivedAt
 
     /**
+     * 초기 사용액 기준 시각 **이후** 거래인가.
+     *
+     * 결제 알림의 시각은 **분 단위**(`09/13 01:54`)인데 기준 시각은 저장한 순간의 밀리초다. 그대로 비교하면
+     * 기준을 넣은 **바로 그 분에 한 결제가 "기준 이전"으로 판정돼 빠진다** — 온보딩을 마치고 곧바로 결제한
+     * 사용자가 "방금 긁었는데 왜 안 늘지?"를 겪는다(에뮬레이터 검증에서 발견). 그래서 분 단위 시각은
+     * **그 분의 끝**으로 보고 비교한다. 같은 분의 결제는 사용자가 카드사 앱 금액을 읽은 뒤에 일어났을
+     * 가능성이 크므로 더하는 쪽이 맞다. 수신 시각으로 대신한(추정) 시각은 이미 정밀하므로 그대로 쓴다.
+     */
+    fun isAfterInitialBaseline(txn: Txn, card: Card): Boolean {
+        val time = effectiveTime(txn)
+        val latestPossible = if (txn.occurredAt != null && !txn.occurredAtEstimated) {
+            time - Math.floorMod(time, MINUTE_MILLIS) + MINUTE_MILLIS - 1
+        } else {
+            time
+        }
+        return latestPossible > card.initialAmountAt
+    }
+
+    private const val MINUTE_MILLIS = 60_000L
+
+    /**
      * 이번 주기에 반영할 초기 사용액.
      *
      * **초기값은 사용자가 입력한 그 주기에만 유효하다.** 주기가 넘어가면 0이다.
@@ -91,7 +112,7 @@ object Aggregator {
                 txn.status == TxStatus.AUTO &&
                 txn.countsTowardTarget &&
                 window.contains(effectiveTime(txn)) &&
-                effectiveTime(txn) > card.initialAmountAt
+                isAfterInitialBaseline(txn, card)
             ) {
                 txn.signedAmount
             } else {
@@ -217,9 +238,9 @@ object Aggregator {
         val auto = inCycle.filter { it.status == TxStatus.AUTO }
         return CardBreakdown(
             progress = progress,
-            counted = auto.filter { it.countsTowardTarget && effectiveTime(it) > card.initialAmountAt },
+            counted = auto.filter { it.countsTowardTarget && isAfterInitialBaseline(it, card) },
             coveredByInitial = auto.filter {
-                progress.initialApplied != 0L && it.countsTowardTarget && effectiveTime(it) <= card.initialAmountAt
+                progress.initialApplied != 0L && it.countsTowardTarget && !isAfterInitialBaseline(it, card)
             },
             notCountedTowardTarget = auto.filter { !it.countsTowardTarget },
             pending = mine.filter { it.status == TxStatus.PENDING },

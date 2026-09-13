@@ -264,6 +264,10 @@ private fun CardStep(
         }
     }
 
+    // 입력 문자열을 따로 든다. 숫자로만 들면 지운 순간 빈칸을 표현할 수 없어 '1'을 지우고 '3'을 치면
+    // '13'이나 '31'이 되고, 범위 밖 값은 조용히 28로 잘렸다(에뮬레이터 검증에서 발견).
+    var dayText by remember(form.startDay) { mutableStateOf(form.startDay.toString()) }
+    val dayValid = dayText.toIntOrNull()?.let { it in 1..28 } == true
     Spacer(Modifier.height(18.dp))
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         UnderlinedField("별명", form.nickname, "예: 우리 카드의정석", DsType.inputText, { v -> onChange { it.copy(nickname = v) } })
@@ -278,13 +282,17 @@ private fun CardStep(
             helper = "쉼표로 구분. 카드사 이름이나 카드 뒷 4자리를 넣으세요.",
         )
         UnderlinedField(
-            "주기 시작일 (1~28)", form.startDay.toString(), "1", DsType.inputText,
-            { v -> v.filter(Char::isDigit).take(2).toIntOrNull()?.let { day -> onChange { it.copy(startDay = day.coerceIn(1, 28)) } } },
+            "주기 시작일 (1~28)", dayText, "1", DsType.inputText,
+            { v ->
+                dayText = v.filter(Char::isDigit).take(2)
+                dayText.toIntOrNull()?.takeIf { it in 1..28 }?.let { day -> onChange { it.copy(startDay = day) } }
+            },
             keyboardType = KeyboardType.Number, suffix = "일",
+            helper = if (dayValid) null else "1부터 28 사이로 넣으세요. 29~31일 시작 카드는 28로 두면 됩니다.",
         )
     }
     Spacer(Modifier.height(18.dp))
-    OutlineButton("이 카드 저장", onSave, Modifier.fillMaxWidth())
+    OutlineButton("이 카드 저장", { if (dayValid) onSave() }, Modifier.fillMaxWidth())
     Spacer(Modifier.height(10.dp))
     PrimaryButton("다음", onNext, enabled = cards.isNotEmpty())
     DsTextButton(if (cards.isEmpty()) "카드는 나중에 등록" else "이전", if (cards.isEmpty()) onNext else onBack)

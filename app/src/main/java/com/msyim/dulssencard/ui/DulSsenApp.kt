@@ -95,6 +95,18 @@ private fun ScreenContent(
 ) {
     if (state.loading) return
 
+    // 시스템 뒤로가기. 없으면 하위 화면에서 뒤로가기를 눌렀을 때 이전 화면이 아니라 **앱이 종료된다**
+    // (에뮬레이터 검증에서 발견). 홈과 온보딩 첫 단계에서만 시스템에 맡겨 앱을 나간다.
+    val backTarget: (() -> Unit)? = when (state.screen) {
+        Screen.HOME -> null
+        Screen.ONBOARD -> if (state.onboardingStep > 0) viewModel::onboardingBack else null
+        Screen.INBOX, Screen.CARDS, Screen.SETTINGS, Screen.CARD_DETAIL -> { { viewModel.go(Screen.HOME) } }
+        Screen.DETAIL, Screen.MANUAL -> viewModel::back
+        Screen.EDIT -> { { viewModel.go(Screen.CARDS) } }
+        Screen.SOURCES, Screen.BACKUP -> { { viewModel.go(Screen.SETTINGS) } }
+    }
+    androidx.activity.compose.BackHandler(enabled = backTarget != null) { backTarget?.invoke() }
+
     val limitProgress = remember(state.txns, state.limitAmount, state.limitCycleStartDay) {
         Aggregator.limitProgress(state.limitAmount, state.limitCycleStartDay, state.txns)
     }

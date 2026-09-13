@@ -352,11 +352,16 @@ private fun SettingRow(
 }
 
 @Composable
-private fun StatusPill(granted: Boolean, disabled: Boolean = false) {
+private fun StatusPill(
+    granted: Boolean,
+    disabled: Boolean = false,
+    onLabel: String = "허용됨",
+    offLabel: String = "필요함",
+) {
     val (label, color) = when {
         disabled -> "사용 불가" to Ds.text3
-        granted -> "허용됨" to Ds.green
-        else -> "필요함" to Ds.accent
+        granted -> onLabel to Ds.green
+        else -> offLabel to Ds.accent
     }
     Box(
         Modifier
@@ -423,8 +428,8 @@ fun SourceAppsScreen(
         item {
             SettingRow(
                 title = "자동 집계",
-                subtitle = if (autoCollectEnabled) "켜짐" else "꺼짐 - 설정에서 켜야 새 결제가 반영됩니다",
-                trailing = { StatusPill(autoCollectEnabled) },
+                subtitle = if (autoCollectEnabled) "새 결제를 자동으로 반영합니다" else "꺼짐 - 설정에서 켜야 새 결제가 반영됩니다",
+                trailing = { StatusPill(autoCollectEnabled, onLabel = "켜짐", offLabel = "꺼짐") },
             )
         }
 

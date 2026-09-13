@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 5,
-    "identityHash": "1c45633780653ff49e68e3f95c9e6754",
+    "identityHash": "0205f739abd797dab7c5dde24c4650a6",
     "entities": [
       {
         "tableName": "cards",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `nickname` TEXT NOT NULL, `trackingTarget` INTEGER NOT NULL, `cycleStartDay` INTEGER NOT NULL, `matchKeywords` TEXT NOT NULL, `excludeKeywords` TEXT NOT NULL, `defaultCountsTowardTarget` INTEGER NOT NULL, `defaultCountsTowardPurchaseLimit` INTEGER NOT NULL, `initialAmount` INTEGER NOT NULL, `initialAmountAt` INTEGER NOT NULL, `active` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `nickname` TEXT NOT NULL, `trackingTarget` INTEGER NOT NULL, `cycleStartDay` INTEGER NOT NULL, `matchKeywords` TEXT NOT NULL, `excludeKeywords` TEXT NOT NULL, `defaultCountsTowardTarget` INTEGER NOT NULL, `defaultCountsTowardPurchaseLimit` INTEGER NOT NULL, `initialAmount` INTEGER NOT NULL, `initialAmountAt` INTEGER NOT NULL, `active` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -84,7 +84,8 @@
             "fieldPath": "updatedAt",
             "columnName": "updatedAt",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -96,7 +97,7 @@
       },
       {
         "tableName": "txns",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `cardId` TEXT, `occurredAt` INTEGER, `occurredAtEstimated` INTEGER NOT NULL, `receivedAt` INTEGER NOT NULL, `amount` INTEGER NOT NULL, `currency` TEXT NOT NULL, `foreignAmountMinor` INTEGER, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `source` TEXT NOT NULL, `merchant` TEXT, `countsTowardTarget` INTEGER NOT NULL, `countsTowardPurchaseLimit` INTEGER NOT NULL, `parserVersion` TEXT NOT NULL, `confidence` REAL NOT NULL, `messageFingerprint` TEXT NOT NULL, `relatedTransactionId` TEXT, `pendingReason` TEXT, `issuerKey` TEXT, `installment` INTEGER NOT NULL, `overseas` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `cardId` TEXT, `occurredAt` INTEGER, `occurredAtEstimated` INTEGER NOT NULL, `receivedAt` INTEGER NOT NULL, `amount` INTEGER NOT NULL, `currency` TEXT NOT NULL, `foreignAmountMinor` INTEGER, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `source` TEXT NOT NULL, `merchant` TEXT, `countsTowardTarget` INTEGER NOT NULL, `countsTowardPurchaseLimit` INTEGER NOT NULL, `parserVersion` TEXT NOT NULL, `confidence` REAL NOT NULL, `messageFingerprint` TEXT NOT NULL, `relatedTransactionId` TEXT, `pendingReason` TEXT, `issuerKey` TEXT, `installment` INTEGER NOT NULL, `overseas` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -227,7 +228,8 @@
             "fieldPath": "updatedAt",
             "columnName": "updatedAt",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -340,7 +342,7 @@
       },
       {
         "tableName": "settings",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`key`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`key` TEXT NOT NULL, `value` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`key`))",
         "fields": [
           {
             "fieldPath": "key",
@@ -358,7 +360,8 @@
             "fieldPath": "updatedAt",
             "columnName": "updatedAt",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -370,7 +373,7 @@
       },
       {
         "tableName": "source_apps",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`packageName` TEXT NOT NULL, `label` TEXT NOT NULL, `issuerKey` TEXT, `enabled` INTEGER NOT NULL, `lastSeenAt` INTEGER NOT NULL, `lastPaymentAt` INTEGER NOT NULL, `recognizedCount` INTEGER NOT NULL, `failedCount` INTEGER NOT NULL, `countsSince` INTEGER NOT NULL, PRIMARY KEY(`packageName`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`packageName` TEXT NOT NULL, `label` TEXT NOT NULL, `issuerKey` TEXT, `enabled` INTEGER NOT NULL, `lastSeenAt` INTEGER NOT NULL, `lastPaymentAt` INTEGER NOT NULL DEFAULT 0, `recognizedCount` INTEGER NOT NULL DEFAULT 0, `failedCount` INTEGER NOT NULL DEFAULT 0, `countsSince` INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(`packageName`))",
         "fields": [
           {
             "fieldPath": "packageName",
@@ -405,25 +408,29 @@
             "fieldPath": "lastPaymentAt",
             "columnName": "lastPaymentAt",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "recognizedCount",
             "columnName": "recognizedCount",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "failedCount",
             "columnName": "failedCount",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "countsSince",
             "columnName": "countsSince",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -472,7 +479,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1c45633780653ff49e68e3f95c9e6754')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '0205f739abd797dab7c5dde24c4650a6')"
     ]
   }
 }
