@@ -507,33 +507,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 암호화 백업이 완성되기 전까지 **아무것도 쓰지 않는다.**
+     *
+     * 이전 구현은 이름과 달리 암호화 없이 전체 거래를 평문 JSON 으로 외부 저장소에 썼다.
+     * SQLCipher 로 DB 를 잠가 놓고 그 옆에 평문 사본을 떨구는 셈이라 막아 둔다.
+     */
     fun exportEncrypted() {
-        viewModelScope.launch {
-            try {
-                val data = withContext(Dispatchers.IO) {
-                    repository.exportData()
-                }
-                val json = Json.encodeToString(data)
-
-                // 내보내기 디렉토리에 파일 저장
-                val context = getApplication<Application>()
-                val exportsDir = File(context.getExternalFilesDir(null), "exports")
-                exportsDir.mkdirs()
-
-                val timestamp = System.currentTimeMillis()
-                val filename = "dulssencard_backup_$timestamp.json"
-                val file = File(exportsDir, filename)
-
-                withContext(Dispatchers.IO) {
-                    file.writeText(json)
-                }
-
-                _state.value = _state.value.copy(exportFileUri = file.absolutePath)
-                say("백업 파일을 저장했습니다: $filename", undoable = false)
-            } catch (e: Exception) {
-                say("내보내기 실패: ${e.message}", undoable = false)
-            }
-        }
+        say("암호화 백업을 준비 중입니다", undoable = false)
     }
 
     /**
