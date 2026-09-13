@@ -1,0 +1,16 @@
+source: SMS
+sender: com.samsung.android.messaging
+receivedAt: 2026-09-08T12:30
+expect.issuer: HYUNDAI
+expect.direction: APPROVAL
+expect.amount: 1500
+expect.occurredAt: 2026-09-08T12:30
+expect.merchant: 마노핀익스프레스신림
+note: 날짜·시각이 아예 없는 형식. 수신 시각으로 추정한다. 누적 금액을 결제액으로 읽으면 안 된다
+---
+[Web발신]
+[현대카드]-승인
+김재*님
+1,500원(일시불)
+마노핀익스프레스신림
+누적:354,220원

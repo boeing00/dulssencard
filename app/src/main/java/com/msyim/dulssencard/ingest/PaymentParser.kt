@@ -30,7 +30,6 @@ data class ParsedPayment(
     val direction: TxDirection,
     val amount: Long,
     val currency: String,
-    /** 해외 승인의 외화 금액. 원화 환산은 하지 않는다(환율을 알 방법이 없다). */
     /** 외화 금액, 최소 통화 단위. [com.msyim.dulssencard.domain.ForeignMoney] 참고. */
     val foreignAmountMinor: Long?,
     val occurredAt: Long?,
@@ -429,7 +428,7 @@ object PaymentParser {
      * → 남는 조각은 `이마트 성수`.
      */
     private fun extractMerchantFromFlatText(body: String, issuerKeywords: List<String>): String? {
-        val cut = " "
+        val cut = "\u0000"
         var text = body
         listOf(WON_AMOUNT, FOREIGN_AMOUNT, DATE_TIME, CARD_SUFFIX, MASKED_NAME, BRACKETED)
             .forEach { text = it.replace(text, cut) }

@@ -1,0 +1,10 @@
+source: IMAGE
+sender: image-ocr
+receivedAt: 2026-09-08T11:01
+expect.reject: true
+note: 은행 앱 캡처의 환전. 카드사 이름이 같이 있어도 카드 결제가 아니다. 한때 자동 반영돼 실적이 부풀었다
+---
+우리카드
+환전주머니 자동
+5,000,000원
+09/08 11:00
