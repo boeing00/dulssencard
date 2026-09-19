@@ -16,6 +16,7 @@ import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
 import com.msyim.dulssencard.domain.Aggregator
 import com.msyim.dulssencard.domain.Cycle
+import com.msyim.dulssencard.domain.FreeTier
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ingest.Ingestor
@@ -135,6 +136,10 @@ data class UiState(
     val autoBackups: List<com.msyim.dulssencard.backup.AutoBackupStore.Entry> = emptyList(),
     /** 취소 거래 상세에서 고를 원 승인 거래 후보. null = 아직 안 불러옴. */
     val cancelCandidates: List<Txn>? = null,
+    /** 한 번 결제(카드 등록 제한 해제) 상태. */
+    val pro: com.msyim.dulssencard.billing.ProUnlock.State = com.msyim.dulssencard.billing.ProUnlock.State(),
+    /** 무료 한도에 걸려 카드 추가를 막았을 때 띄우는 안내. */
+    val showUpgrade: Boolean = false,
 ) {
     val pendingCount: Int get() = txns.count { it.status == TxStatus.PENDING }
 
@@ -194,7 +199,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var undoSnapshot: DulSsenRepository.Snapshot? = null
     private var toastJob: Job? = null
 
+    private val proUnlock = com.msyim.dulssencard.billing.ProUnlock(app)
+
     init {
+        proUnlock.start()
+        viewModelScope.launch {
+            proUnlock.state.collect { pro ->
+                val justUnlocked = pro.owned && !_state.value.pro.owned && !_state.value.loading
+                _state.value = _state.value.copy(pro = pro, showUpgrade = _state.value.showUpgrade && !pro.owned)
+                if (justUnlocked) say("카드 등록 제한이 풀렸습니다. 고맙습니다!", undoable = false)
+            }
+        }
         viewModelScope.launch {
             combine(
                 repository.cards,
@@ -369,7 +384,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 카드
 
-    fun newCard() = navigate(Screen.EDIT) { it.copy(editingCardId = null, form = CardForm()) }
+    fun newCard() {
+        // 무료 한도면 폼을 다 채운 뒤에 막지 않고 들어가기 전에 알린다.
+        if (!FreeTier.canAddCard(_state.value.cards.size, _state.value.pro.owned)) {
+            _state.value = _state.value.copy(showUpgrade = true)
+            return
+        }
+        navigate(Screen.EDIT) { it.copy(editingCardId = null, form = CardForm()) }
+    }
+
+    // ------------------------------------------------------------- 한 번 결제
+
+    /** 결제 창. Play 스토어가 없거나 상품 정보를 아직 못 받았으면 알린다. */
+    fun buyPro(activity: android.app.Activity) {
+        if (!proUnlock.launch(activity)) {
+            say("지금은 결제 창을 열 수 없습니다. Play 스토어에 로그인돼 있는지 확인해 주세요", undoable = false)
+        }
+    }
+
+    /** 구매 복원. 재설치했거나 같은 계정의 다른 기기에서 산 경우. */
+    fun restorePro() {
+        proUnlock.refreshPurchases()
+        say("구매 내역을 확인했습니다", undoable = false)
+    }
+
+    fun dismissUpgrade() {
+        _state.value = _state.value.copy(showUpgrade = false)
+    }
+
+    override fun onCleared() {
+        proUnlock.close()
+        super.onCleared()
+    }
 
     fun editCard(card: Card) = navigate(Screen.EDIT) {
         it.copy(
@@ -416,6 +462,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val editingId = _state.value.editingCardId
+        // 새 카드만 한도를 본다(온보딩 포함). 기존 카드 편집은 한도와 무관하다.
+        if (editingId == null && !FreeTier.canAddCard(_state.value.cards.size, _state.value.pro.owned)) {
+            _state.value = _state.value.copy(showUpgrade = true)
+            return
+        }
         viewModelScope.launch {
             val existing = editingId?.let { repository.card(it) }
             // 기준 시각 규칙은 Aggregator.initialAmountAtOnSave 주석 참고.

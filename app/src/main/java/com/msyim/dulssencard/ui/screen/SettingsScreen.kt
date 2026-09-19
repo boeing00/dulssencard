@@ -63,6 +63,10 @@ fun SettingsScreen(
     onOpenNotificationAccess: () -> Unit,
     onOpenSourceApps: () -> Unit,
     onOpenBackup: () -> Unit,
+    /** 한 번 결제 상태. */
+    pro: com.msyim.dulssencard.billing.ProUnlock.State,
+    onBuyPro: () -> Unit,
+    onRestorePro: () -> Unit,
     onImportFromImage: () -> Unit,
     onWipe: () -> Unit,
     modifier: Modifier = Modifier,
@@ -149,6 +153,35 @@ fun SettingsScreen(
         }
 
         // ---------------------------------------------------------- P1 · 내 데이터
+
+        item { SettingsGroupHeader("카드 무제한") }
+
+        item {
+            SettingRow(
+                title = when {
+                    pro.owned -> "카드 무제한 사용 중"
+                    pro.pending -> "결제 확인을 기다리는 중"
+                    else -> "카드 무제한 풀기" + (pro.price?.let { " · $it" } ?: "")
+                },
+                subtitle = when {
+                    pro.owned -> "고맙습니다. 카드를 원하는 만큼 등록할 수 있습니다."
+                    pro.pending -> "결제가 확정되면 자동으로 풀립니다."
+                    else -> "무료로는 카드 ${com.msyim.dulssencard.domain.FreeTier.FREE_CARD_LIMIT}장까지 등록합니다. " +
+                        "한 번 결제하면 제한이 없어집니다. 수집·집계·백업은 무료 그대로입니다."
+                },
+                onClick = if (pro.owned || pro.pending) null else onBuyPro,
+            )
+        }
+
+        if (!pro.owned) {
+            item {
+                SettingRow(
+                    title = "구매 복원",
+                    subtitle = "재설치했거나 같은 Google 계정의 다른 기기에서 샀다면 눌러 주세요.",
+                    onClick = onRestorePro,
+                )
+            }
+        }
 
         item { SettingsGroupHeader("내 데이터") }
 

@@ -34,6 +34,7 @@ import com.msyim.dulssencard.ui.screen.CardDetailScreen
 import com.msyim.dulssencard.ui.screen.BackupScreen
 import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.ingest.SourceGate
+import com.msyim.dulssencard.ui.component.DsConfirmDialog
 import com.msyim.dulssencard.ui.component.CountBadge
 import com.msyim.dulssencard.ui.component.DsSnackbar
 import com.msyim.dulssencard.ui.component.Hairline
@@ -73,6 +74,19 @@ fun DulSsenApp(viewModel: MainViewModel = viewModel()) {
                     onSelect = viewModel::go,
                 )
             }
+        }
+
+        if (state.showUpgrade) {
+            val limit = com.msyim.dulssencard.domain.FreeTier.FREE_CARD_LIMIT
+            DsConfirmDialog(
+                title = "무료로는 카드 ${limit}장까지 등록합니다",
+                text = "한 번 결제하면 카드를 원하는 만큼 등록할 수 있습니다. 이미 등록한 카드와 수집·집계·백업은 " +
+                    "결제와 상관없이 그대로 씁니다." +
+                    (state.pro.price?.let { "\n\n가격 $it · 한 번만 결제" } ?: ""),
+                confirmLabel = "카드 무제한 풀기",
+                onConfirm = { (context as? android.app.Activity)?.let(viewModel::buyPro) },
+                onDismiss = viewModel::dismissUpgrade,
+            )
         }
 
         state.toast?.let { toast ->
@@ -300,6 +314,9 @@ private fun ScreenContent(
             },
             onOpenSourceApps = { viewModel.go(Screen.SOURCES) },
             onOpenBackup = viewModel::openBackup,
+            pro = state.pro,
+            onBuyPro = { (context as? android.app.Activity)?.let(viewModel::buyPro) },
+            onRestorePro = viewModel::restorePro,
             onImportFromImage = viewModel::requestImageImport,
             onWipe = viewModel::wipeAll,
         )

@@ -36,7 +36,7 @@
 - 버전: `0.1.0` / versionCode 1 · minSdk 26 · compileSdk·targetSdk 37
 - APK: release 51.0MB (대부분 ML Kit 한국어 OCR 모델, BouncyCastle 은 R8 후 +0.1MB)
 - DB 스키마: **v5** (`AppDatabase.SCHEMA_VERSION`)
-- 테스트: **265개 전부 통과** (2026-09-19 기준), lint 오류 0
+- 테스트: **269개 전부 통과** (2026-09-19 기준), lint 오류 0
 - git: `main`, 원격 `boeing00/dulssencard` (**공개**) — §11 의 개인정보 이력 문제를 먼저 볼 것
 
 ---
@@ -45,14 +45,19 @@
 
 이 셋은 앱의 정체성이자 Play 심사 서사다. 편의를 위해 무심코 어기기 쉬우니 먼저 못 박는다.
 
-### ① 선언 권한은 알림 접근 하나뿐
+### ① 네트워크 권한이 없다 — 민감 권한은 알림 접근 하나뿐
 
-병합된 릴리스 매니페스트에 **선언된 권한이 0개**다(`BIND_NOTIFICATION_LISTENER_SERVICE` 는
-서비스 속성이라 별개). ML Kit 이 끌고 들어오는 `INTERNET` / `ACCESS_NETWORK_STATE` 는
-`tools:node="remove"` 로 빼 뒀다.
+병합된 릴리스 매니페스트의 권한은 **정확히 이 두 줄**이다(`BIND_NOTIFICATION_LISTENER_SERVICE` 는
+서비스 속성이라 별개):
+
+- `com.android.vending.BILLING` — 한 번 결제(§14). 위험 권한 아님, 사용자에게 묻지 않는다.
+- `<패키지>.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` — androidx.core 가 붙이는 앱 전용 서명 권한.
+
+ML Kit 과 Play 결제 라이브러리(그 의존성 `transport-backend-cct`)가 끌고 들어오는
+`INTERNET` / `ACCESS_NETWORK_STATE` 는 `tools:node="remove"` 로 빼 뒀다.
 
 ```bash
-# 권한이 새어 들어왔는지 확인 — 출력이 비어 있어야 정상
+# 권한이 새어 들어왔는지 확인 — 위 두 줄만 나와야 정상
 ./gradlew :app:processReleaseManifest && \
   grep 'uses-permission' app/build/intermediates/merged_manifests/release/*/AndroidManifest.xml
 ```
@@ -89,7 +94,7 @@ cd /c/Users/moons/AndroidStudioProjects/dulssencard
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 ADB="C:/Users/moons/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
-./gradlew :app:testDebugUnitTest        # 265개, 기기 없이 돈다(Robolectric 포함)
+./gradlew :app:testDebugUnitTest        # 269개, 기기 없이 돈다(Robolectric 포함)
 ./gradlew :app:assembleDebug
 "$ADB" -s R3CX50262WD install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -448,4 +453,26 @@ PRD 와 이 문서가 어긋나면 **PRD 가 무엇을·이 문서가 어떻게*
 Gemini CLI 는 파일을 많이 읽는 긴 질의에서 **출력 없이 멈춘다**(MCP 30분 · CLI 15분 모두). 그럴 땐
 `ask-free-ai.py --provider gemini --file` 로 소스를 붙여 묻는다. Codex 는 `codex exec` 가 전역 리뷰 스킬에
 가로채여 "어떤 리뷰를 실행할까요?"로 되물을 수 있다 — 프롬프트 첫 줄에 되묻지 말라고 적는다.
+
+---
+
+## 14. 무료 + 한 번 결제 (2026-09-19 사용자 결정)
+
+- **무료로 카드 2장까지.** 한 번 결제(인앱 상품 `pro_unlock`, 2,900원)로 제한을 푼다. 광고는 넣지 않는다 —
+  광고 SDK 는 INTERNET 이 필요해 §1① 이 깨진다.
+- **이미 가진 데이터는 잠그지 않는다.** 막는 것은 새 카드 추가뿐(`FreeTier.canAddCard`, `newCard` · `saveCard`).
+  백업 복원 · 환불로 한도를 넘긴 카드도 그대로 동작한다.
+- 결제는 `billing/ProUnlock.kt`. 구매 여부 캐시는 **SharedPreferences**(`pro_unlock`) — DB settings 표에
+  두면 백업을 따라 다른 계정으로 넘어간다. 앱을 켤 때마다 Play 에 다시 묻고, 환불되면 무료로 돌아간다.
+- 가격은 코드에 없다. 콘솔 값을 `ProductDetails.formattedPrice` 로 받아 보여 준다.
+- 에뮬레이터(Play 스토어 있음)에서 확인한 것: 3번째 카드 추가 → 안내 대화상자, 상품이 없을 때 결제 창 대신
+  안내 문구, 설정의 '카드 무제한' · '구매 복원'. **실제 결제는 콘솔에 상품을 만든 뒤에만 확인할 수 있다.**
+
+### Play Console 에서 사용자가 할 일 (위임 금지 — 결제 · 서명)
+
+1. 판매자(결제) 프로필 등록 — 유료 상품을 팔려면 필요하다.
+2. 앱 만들기(`com.msyim.dulssencard`) → **서명한 릴리스 AAB 를 내부 테스트 트랙에 먼저 올린다.**
+   BILLING 권한이 든 빌드가 한 번 올라가야 인앱 상품을 만들 수 있다.
+3. 인앱 상품: ID `pro_unlock`(코드 `FreeTier.PRO_PRODUCT_ID` 와 같아야 한다), 일회성, 2,900원, 활성화.
+4. 라이선스 테스터에 본인 계정 → 내부 테스트로 설치해 구매 · 구매 복원 · 환불 후 무료 복귀를 확인.
 

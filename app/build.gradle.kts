@@ -125,6 +125,9 @@ dependencies {
     // 백업 비밀번호 키 유도(Argon2id). JDK·Android 표준 API 에는 Argon2 가 없다.
     // 순수 자바 구현이라 네이티브 라이브러리도, 네트워크 권한도 끌고 오지 않는다.
     implementation(libs.bouncycastle.prov)
+    // 한 번 결제(카드 등록 제한 해제). Play 스토어 앱과 기기 안 IPC 로만 통신한다.
+    // 이 라이브러리가 끌고 오는 INTERNET · ACCESS_NETWORK_STATE 는 매니페스트에서 tools:node="remove" 로 뺀다.
+    implementation(libs.play.billing)
     // 온디바이스 Gemini Nano(com.google.mlkit:genai-prompt)는 **빼 두었다.**
     // 2026-09-08 갤럭시 S24+(SM-S926N, Android 16)에서 checkStatus() 가 UNAVAILABLE(0) 을
     // 돌려줬다. AICore 는 구글·삼성 둘 다 깔려 있지만 ML Kit GenAI 의 기기 허용 목록에
