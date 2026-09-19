@@ -80,7 +80,7 @@ class IngestorTest {
         raw = raw,
         cards = cards,
         existingByFingerprint = { fp -> existing.firstOrNull { it.messageFingerprint == fp } },
-        cancelOriginFinder = { amount, issuer, before ->
+        cancelOriginFinder = { amount, issuer, before, _ ->
             existing.firstOrNull {
                 it.amount == amount &&
                     it.issuerKey == issuer &&

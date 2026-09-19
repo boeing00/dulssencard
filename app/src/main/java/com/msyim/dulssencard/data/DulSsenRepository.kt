@@ -99,8 +99,8 @@ class DulSsenRepository @VisibleForTesting internal constructor(
             raw = raw,
             cards = db.cardDao().all(),
             existingByFingerprint = { fingerprint -> db.txnDao().byFingerprint(fingerprint) },
-            cancelOriginFinder = { amount, issuerKey, before ->
-                db.txnDao().findCancelOrigin(amount, issuerKey, before)
+            cancelOriginFinder = { amount, issuerKey, before, cardId ->
+                db.txnDao().findCancelOrigin(amount, issuerKey, before, cardId)
             },
         )
         val result = when (outcome) {
@@ -368,22 +368,25 @@ class DulSsenRepository @VisibleForTesting internal constructor(
     }
 
     /**
-     * 제외한 거래를 영구히 지운다. **제외됨 상태가 아닌 거래는 넘겨도 지우지 않는다** — 합계에 들어간
-     * 거래를 실수로 지우면 사용자가 모르는 사이 숫자가 줄어든다. 실제로 지운 건수를 돌려준다.
+     * 합계에 없는 거래(제외 · 확인 필요)를 영구히 지운다. 결제가 아닌 알림이 잡혔을 때 결과함에서 바로 치운다.
+     * **자동 반영 거래는 넘겨도 지우지 않는다** — 합계에 들어간 거래를 실수로 지우면 사용자가 모르는 사이
+     * 숫자가 줄어든다. 지우려면 먼저 제외해야 한다. 실제로 지운 건수를 돌려준다.
      *
-     * 한 트랜잭션에서 세 가지를 함께 한다: 이 거래를 원 거래로 가리키던 취소의 연결 끊기, 이 거래의
-     * 변경 기록 삭제, 거래 삭제. 연결을 안 끊으면 취소가 없는 거래를 가리킨다.
+     * 한 트랜잭션에서 함께 한다: 이 거래를 원 거래로 가리키던 취소를 제외하고 연결 끊기, 이 거래의
+     * 변경 기록 삭제, 거래 삭제. 연결을 안 끊으면 취소가 없는 거래를 가리키고, 제외하지 않으면
+     * 원 거래 없는 취소가 합계를 음수로 끌어내린다(원 거래는 합계에 없던 거래다).
      *
      * 지운 결제는 지문도 사라진다. 같은 결제가 들어 있는 백업을 병합하면 다시 들어온다(제외 상태 그대로).
      */
-    suspend fun deleteExcludedTxns(ids: List<String>): Int = atomically {
+    suspend fun deleteUncountedTxns(ids: List<String>, now: Long = System.currentTimeMillis()): Int = atomically {
         if (ids.isEmpty()) return@atomically 0
-        val deletable = db.txnDao().excludedIds(ids)
+        val deletable = db.txnDao().uncountedIds(ids)
         if (deletable.isEmpty()) return@atomically 0
+        db.txnDao().excludeCancelsOf(deletable, now)
         db.txnDao().unlinkFrom(deletable)
         db.adjustmentDao().deleteForTxns(deletable)
         checkpoint("deleteExcluded:beforeDelete")
-        db.txnDao().deleteExcluded(deletable)
+        db.txnDao().deleteUncounted(deletable)
     }
 
     /** 금액 정정. 알림에서 잘못 읽었거나 부분 취소가 반영 안 된 경우. */
@@ -405,7 +408,9 @@ class DulSsenRepository @VisibleForTesting internal constructor(
      */
     suspend fun linkCancel(cancel: Txn, origin: Txn, now: Long = System.currentTimeMillis()): Txn =
         atomically {
-            val cardId = cancel.cardId ?: origin.cardId
+            // 사용자가 직접 고른 원 거래가 더 확실한 근거다. 취소가 다른 카드에 잘못 붙어 있었으면
+            // 그대로 두면 원 거래 카드는 차감이 안 되고 엉뚱한 카드가 음수가 된다.
+            val cardId = origin.cardId ?: cancel.cardId
             val onlyBlockedByLink = cancel.pendingReason == PendingReason.UNLINKED_CANCEL ||
                 (cancel.pendingReason == PendingReason.NO_CARD_MATCH && cardId != null)
             val after = cancel.copy(

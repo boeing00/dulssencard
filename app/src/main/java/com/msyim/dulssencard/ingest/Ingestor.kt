@@ -32,13 +32,14 @@ object Ingestor {
 
     /**
      * @param existingByFingerprint 같은 지문을 가진 기존 거래(있으면).
-     * @param cancelOriginFinder    취소 거래의 원 승인 거래를 찾는 함수.
+     * @param cancelOriginFinder    취소 거래의 원 승인 거래를 찾는 함수. 마지막 인자는 취소가 잡힌 카드(모르면 null) —
+     *                              같은 카드의 승인을 먼저 고르는 데 쓴다.
      */
     suspend fun ingest(
         raw: RawMessage,
         cards: List<Card>,
         existingByFingerprint: suspend (String) -> Txn?,
-        cancelOriginFinder: suspend (amount: Long, issuerKey: String?, before: Long) -> Txn?,
+        cancelOriginFinder: suspend (amount: Long, issuerKey: String?, before: Long, cardId: String?) -> Txn?,
     ): Outcome {
         val parsed = PaymentParser.parse(raw) ?: return Outcome.NotAPayment
 
@@ -89,7 +90,7 @@ object Ingestor {
         if (parsed.direction == TxDirection.CANCEL) {
             val before = parsed.occurredAt ?: raw.receivedAt
             relatedTransactionId =
-                cancelOriginFinder(parsed.amount, parsed.issuerKey, before)?.id
+                cancelOriginFinder(parsed.amount, parsed.issuerKey, before, cardId)?.id
         }
 
         val reason = firstBlockingReason(

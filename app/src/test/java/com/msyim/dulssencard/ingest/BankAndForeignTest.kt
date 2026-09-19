@@ -181,7 +181,7 @@ class BankAndForeignTest {
             ),
             cards = listOf(card),
             existingByFingerprint = { null },
-            cancelOriginFinder = { _, _, _ -> null },
+            cancelOriginFinder = { _, _, _, _ -> null },
         )
         val txn = (outcome as Ingestor.Outcome.Insert).txn
         assertEquals(TxStatus.PENDING, txn.status)

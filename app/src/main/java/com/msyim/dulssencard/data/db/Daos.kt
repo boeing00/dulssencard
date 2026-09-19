@@ -54,6 +54,10 @@ interface TxnDao {
      * 취소 거래를 원 승인 거래에 연결할 후보.
      * 같은 카드사·같은 금액·승인 방향이고, 취소 시각보다 앞선 것 중 가장 최근 것을 고른다.
      * 이미 다른 취소가 물린 거래는 [relatedTransactionId] 역참조로 걸러 낸다.
+     *
+     * 취소가 어느 카드인지 알면 **그 카드의 승인을 먼저** 고른다. 같은 카드사 카드를 둘 쓰면서
+     * 같은 금액을 결제하면, 시각만 보고 고를 때 다른 카드의 승인에 붙어 한쪽은 차감이 안 되고
+     * 다른 쪽 원 거래 설정을 따라가 버린다.
      */
     @Query(
         """
@@ -63,11 +67,12 @@ interface TxnDao {
           AND (:issuerKey IS NULL OR issuerKey IS NULL OR issuerKey = :issuerKey)
           AND COALESCE(occurredAt, receivedAt) <= :before
           AND id NOT IN (SELECT relatedTransactionId FROM txns WHERE relatedTransactionId IS NOT NULL)
-        ORDER BY COALESCE(occurredAt, receivedAt) DESC
+        ORDER BY CASE WHEN :cardId IS NOT NULL AND cardId = :cardId THEN 0 ELSE 1 END,
+                 COALESCE(occurredAt, receivedAt) DESC
         LIMIT 1
         """,
     )
-    suspend fun findCancelOrigin(amount: Long, issuerKey: String?, before: Long): Txn?
+    suspend fun findCancelOrigin(amount: Long, issuerKey: String?, before: Long, cardId: String?): Txn?
 
     /**
      * 연결에 실패한 취소 거래의 **원 승인 거래 후보**. 사용자가 직접 고르게 보여 준다.
@@ -105,16 +110,23 @@ interface TxnDao {
     @Upsert
     suspend fun upsert(txn: Txn)
 
-    /** **제외됨 상태만** 지운다. 합계에 들어간 거래는 조건에 걸리지 않아 지워지지 않는다. */
-    @Query("DELETE FROM txns WHERE id IN (:ids) AND status = 'EXCLUDED'")
-    suspend fun deleteExcluded(ids: List<String>): Int
+    /** **합계에 없는 거래(제외 · 확인 필요)만** 지운다. 자동 반영 거래는 조건에 걸리지 않아 지워지지 않는다. */
+    @Query("DELETE FROM txns WHERE id IN (:ids) AND status IN ('EXCLUDED', 'PENDING')")
+    suspend fun deleteUncounted(ids: List<String>): Int
+
+    /**
+     * 지워질 거래(제외 · 확인 필요)를 원 거래로 가리키던 취소도 제외한다. 원 거래가 합계에 없던 거래이므로
+     * 연결만 끊으면 원 거래 없는 취소가 남아 합계를 음수로 끌어내린다. [unlinkFrom] 보다 먼저 불러야 한다.
+     */
+    @Query("UPDATE txns SET status = 'EXCLUDED', pendingReason = NULL, updatedAt = :now WHERE relatedTransactionId IN (:ids)")
+    suspend fun excludeCancelsOf(ids: List<String>, now: Long)
 
     /** 지워질 거래를 원 거래로 가리키던 취소의 연결을 끊는다. */
     @Query("UPDATE txns SET relatedTransactionId = NULL WHERE relatedTransactionId IN (:ids)")
     suspend fun unlinkFrom(ids: List<String>)
 
-    @Query("SELECT id FROM txns WHERE id IN (:ids) AND status = 'EXCLUDED'")
-    suspend fun excludedIds(ids: List<String>): List<String>
+    @Query("SELECT id FROM txns WHERE id IN (:ids) AND status IN ('EXCLUDED', 'PENDING')")
+    suspend fun uncountedIds(ids: List<String>): List<String>
 
     @Query("UPDATE txns SET cardId = NULL, status = 'PENDING', pendingReason = 'NO_CARD_MATCH' WHERE cardId = :cardId")
     suspend fun detachFromCard(cardId: String)

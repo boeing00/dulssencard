@@ -209,7 +209,7 @@ private fun ScreenContent(
                 viewModel.openManualEntry(filtered, Screen.INBOX)
             },
             onRestore = viewModel::restoreTxn,
-            onDelete = viewModel::deleteExcluded,
+            onDelete = viewModel::deleteUncounted,
         )
 
         Screen.DETAIL -> {
@@ -238,7 +238,7 @@ private fun ScreenContent(
                     onPickOrigin = { origin -> viewModel.linkCancel(txn, origin) },
                     onDismissCandidates = viewModel::clearCancelCandidates,
                     onOpenTxn = { viewModel.openTxn(it.id, state.backTo) },
-                    onDelete = { viewModel.deleteExcluded(listOf(txn)) },
+                    onDelete = { viewModel.deleteUncounted(listOf(txn)) },
                 )
             }
         }

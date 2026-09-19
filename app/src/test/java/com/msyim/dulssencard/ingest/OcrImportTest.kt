@@ -42,7 +42,7 @@ class OcrImportTest {
         ),
         cards = cards,
         existingByFingerprint = { fp -> existing.firstOrNull { it.messageFingerprint == fp } },
-        cancelOriginFinder = { _, _, _ -> null },
+        cancelOriginFinder = { _, _, _, _ -> null },
     )
 
     private fun inserted(outcome: Ingestor.Outcome): Txn {

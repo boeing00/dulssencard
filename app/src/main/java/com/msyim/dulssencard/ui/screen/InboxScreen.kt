@@ -208,9 +208,8 @@ fun InboxScreen(
 
     deleting?.let { targets ->
         DsConfirmDialog(
-            title = if (targets.size == 1) "제외한 거래를 삭제할까요?" else "제외한 거래 ${targets.size}건을 삭제할까요?",
-            text = "기기에서 영구히 지웁니다. 합계에는 원래 들어가 있지 않아 숫자는 바뀌지 않습니다. " +
-                "삭제 직후 4.2초 안에는 되돌릴 수 있습니다.",
+            title = deleteTitle(targets),
+            text = DELETE_NOTE,
             confirmLabel = "삭제",
             destructive = true,
             onConfirm = { onDelete(targets) },
@@ -227,6 +226,20 @@ fun InboxScreen(
         )
     }
 }
+
+/** 삭제 확인 제목. 결과함 · 상세 화면이 함께 쓴다. */
+internal fun deleteTitle(targets: List<Txn>): String {
+    val kind = when {
+        targets.all { it.status == TxStatus.EXCLUDED } -> "제외한 거래"
+        targets.all { it.status == TxStatus.PENDING } -> "확인 필요 거래"
+        else -> "거래"
+    }
+    return if (targets.size == 1) "${kind}를 삭제할까요?" else "$kind ${targets.size}건을 삭제할까요?"
+}
+
+internal const val DELETE_NOTE =
+    "기기에서 영구히 지웁니다. 합계에는 원래 들어가 있지 않아 숫자는 바뀌지 않습니다. " +
+        "삭제 직후 4.2초 안에는 되돌릴 수 있습니다."
 
 @Composable
 private fun TxnRow(
@@ -319,6 +332,8 @@ private fun TxnRow(
                         if (txn.cardId != null) QuickAction("반영", Ds.ink, onConfirm)
                         QuickAction(if (txn.cardId == null) "카드 지정" else "카드 변경", Ds.ink, onAssign)
                         QuickAction("제외", Ds.accent, onExclude)
+                        // 결제가 아닌 알림이 잡혔을 때 제외를 한 번 거치지 않고 바로 치운다.
+                        QuickAction("삭제", Ds.accent, onDelete)
                     }
                 }
             }

@@ -42,6 +42,7 @@ import com.msyim.dulssencard.ingest.IssuerRegistry
 import com.msyim.dulssencard.ui.component.AmountEditDialog
 import com.msyim.dulssencard.ui.component.DestructiveButton
 import com.msyim.dulssencard.ui.component.DsConfirmDialog
+import com.msyim.dulssencard.ui.component.DsTextButton
 import com.msyim.dulssencard.ui.component.InlineLink
 import com.msyim.dulssencard.ui.component.OutlineButton
 import com.msyim.dulssencard.ui.component.DsChip
@@ -207,6 +208,10 @@ fun DetailScreen(
                 } else {
                     PrimaryButton("집계 확정", onConfirm)
                     DestructiveButton("실적 제외", onExclude)
+                    // 자동 반영 거래는 바로 지우지 않는다 — 합계가 사용자 모르게 줄어든다. 제외한 뒤에 지운다.
+                    if (txn.status == TxStatus.PENDING) {
+                        DsTextButton("삭제", { confirmDelete = true })
+                    }
                 }
             }
         }
@@ -214,9 +219,8 @@ fun DetailScreen(
 
     if (confirmDelete) {
         DsConfirmDialog(
-            title = "제외한 거래를 삭제할까요?",
-            text = "기기에서 영구히 지웁니다. 합계에는 원래 들어가 있지 않아 숫자는 바뀌지 않습니다. " +
-                "삭제 직후 4.2초 안에는 되돌릴 수 있습니다.",
+            title = deleteTitle(listOf(txn)),
+            text = DELETE_NOTE,
             confirmLabel = "삭제",
             destructive = true,
             onConfirm = onDelete,

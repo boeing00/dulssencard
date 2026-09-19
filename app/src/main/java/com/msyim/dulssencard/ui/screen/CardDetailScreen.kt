@@ -184,6 +184,15 @@ fun CardDetailScreen(
                 onOpenTxn = onOpenTxn,
             )
         }
+        if (breakdown.cancelOfUncountedOrigin.isNotEmpty()) {
+            section(
+                title = "원 거래를 따라 뺀 취소 ${breakdown.cancelOfUncountedOrigin.size}건",
+                txns = breakdown.cancelOfUncountedOrigin,
+                empty = "",
+                onOpenTxn = onOpenTxn,
+                note = "원 거래가 합계에 없어 취소도 차감하지 않았습니다.",
+            )
+        }
         if (breakdown.excluded.isNotEmpty()) {
             section(
                 title = "제외한 거래 ${breakdown.excluded.size}건",

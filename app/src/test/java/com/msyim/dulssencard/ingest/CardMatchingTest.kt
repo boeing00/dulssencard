@@ -63,7 +63,7 @@ class CardMatchingTest {
         raw = raw,
         cards = cards,
         existingByFingerprint = { null },
-        cancelOriginFinder = { _, _, _ -> null },
+        cancelOriginFinder = { _, _, _, _ -> null },
     )
 
     // ------------------------------------------------------- 제보한 증상

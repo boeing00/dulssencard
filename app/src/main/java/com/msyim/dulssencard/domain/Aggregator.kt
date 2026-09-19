@@ -1,6 +1,7 @@
 package com.msyim.dulssencard.domain
 
 import com.msyim.dulssencard.data.model.Card
+import com.msyim.dulssencard.data.model.TxDirection
 import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
@@ -11,6 +12,7 @@ import java.time.Instant
  *
  * - 카드 누적 = 그 카드의 `status == AUTO && countsTowardTarget` 거래 합. 취소는 차감.
  * - 한도 사용액 = `status == AUTO && countsTowardPurchaseLimit` 거래 합(카드 무관). 취소는 차감.
+ * - 원 거래를 찾은 취소는 자기 설정 대신 **원 거래의 상태·설정**을 따른다([counts]).
  * - `PENDING`(확인 필요)과 `EXCLUDED`(제외)는 어떤 합계에도 반영하지 않는다.
  * - 진행률은 0~100% 로 클램프한다.
  * - 카드 주기와 한도 주기는 독립 계산한다.
@@ -82,6 +84,52 @@ object Aggregator {
 
     private const val MINUTE_MILLIS = 60_000L
 
+    /** 연결된 취소의 원 거래. 취소가 아니거나 원 거래를 찾을 수 없으면 null. */
+    private fun originOf(txn: Txn, byId: Map<String, Txn>): Txn? =
+        if (txn.direction == TxDirection.CANCEL) txn.relatedTransactionId?.let { byId[it] } else null
+
+    /**
+     * 자동 반영 거래 [txn] 이 [flag](목표 추적 포함 · 한도 포함)로 이 합계에 들어가는가.
+     *
+     * **원 거래를 찾은 취소는 원 거래를 따라간다** — 자기 설정은 보지 않는다. 취소는 원 거래를 되돌리는
+     * 것이므로, 원 거래가 합계에 없으면(제외 · 확인 필요 · 설정 꺼짐) 취소만 빠져 합계가 **음수**가 되고,
+     * 원 거래가 합계에 있는데 취소의 설정만 꺼져 있으면(카드 기본값이 꺼진 채 들어온 경우) 차감이 안 된다.
+     * 원 거래 상태는 나중에 바뀔 수 있으므로 연결 시점에 굳히지 않고 집계할 때마다 본다.
+     *
+     * 원 거래의 **시각은 보지 않는다.** 기준 시각 이전이거나 지난 주기 거래여도 합계에 들어간 거래라면
+     * 카드사 누적액도 함께 줄어드므로 차감한다(CLAUDE.md §4 규칙 ③). 원 거래를 찾을 수 없으면
+     * 판단할 근거가 없으므로 자기 설정을 쓴다.
+     */
+    private fun counts(txn: Txn, byId: Map<String, Txn>, flag: (Txn) -> Boolean): Boolean {
+        val origin = originOf(txn, byId) ?: return flag(txn)
+        return origin.status == TxStatus.AUTO && flag(origin)
+    }
+
+    /**
+     * 카드 편집을 저장할 때 쓸 초기 사용액 기준 시각.
+     *
+     * 값도 주기 시작일도 그대로이고 기존 기준이 **지금 주기 안**이면 유지한다 — 저장만 눌렀다고
+     * 기준이 지금으로 밀리면 그 사이 들어온 거래가 초기값 안으로 빨려 들어가 사라진다.
+     * 그 밖에는 지금을 기준으로 새로 찍는다:
+     * - 값이 바뀌었다 — 방금 카드사 앱에서 읽은 숫자다.
+     * - 기존 기준이 지난 주기다 — 편집 화면은 지난 주기 값을 빈칸으로 보여 주므로, 입력한 금액이
+     *   우연히 지난달과 같아도 사용자가 이번 달 숫자로 새로 넣은 것이다.
+     * - 주기 시작일이 바뀌었다 — 기존 기준이 새 주기 밖으로 밀려 초기값이 통째로 사라진다.
+     */
+    fun initialAmountAtOnSave(existing: Card?, newInitial: Long, newStartDay: Int, now: Instant = Instant.now()): Long {
+        if (newInitial <= 0L) return 0L
+        if (
+            existing != null &&
+            existing.initialAmountAt != 0L &&
+            existing.initialAmount == newInitial &&
+            Cycle.normalizeStartDay(existing.cycleStartDay) == Cycle.normalizeStartDay(newStartDay) &&
+            Cycle.windowFor(newStartDay, now).contains(existing.initialAmountAt)
+        ) {
+            return existing.initialAmountAt
+        }
+        return now.toEpochMilli()
+    }
+
     /**
      * 이번 주기에 반영할 초기 사용액.
      *
@@ -106,11 +154,12 @@ object Aggregator {
     ): CardProgress {
         val window = Cycle.windowFor(card.cycleStartDay, now)
         val initial = initialAmountIn(card, window)
+        val byId = txns.associateBy { it.id }
         val spent = initial + txns.sumOf { txn ->
             if (
                 txn.cardId == card.id &&
                 txn.status == TxStatus.AUTO &&
-                txn.countsTowardTarget &&
+                counts(txn, byId) { it.countsTowardTarget } &&
                 window.contains(effectiveTime(txn)) &&
                 isAfterInitialBaseline(txn, card)
             ) {
@@ -140,10 +189,11 @@ object Aggregator {
         now: Instant = Instant.now(),
     ): LimitProgress {
         val window = Cycle.windowFor(limitCycleStartDay, now)
+        val byId = txns.associateBy { it.id }
         val spent = txns.sumOf { txn ->
             if (
                 txn.status == TxStatus.AUTO &&
-                txn.countsTowardPurchaseLimit &&
+                counts(txn, byId) { it.countsTowardPurchaseLimit } &&
                 window.contains(effectiveTime(txn))
             ) {
                 txn.signedAmount
@@ -179,9 +229,12 @@ object Aggregator {
         now: Instant = Instant.now(),
     ): List<ForeignSpend> {
         val window = Cycle.windowFor(limitCycleStartDay, now)
+        val byId = txns.associateBy { it.id }
         return txns
             .filter { txn ->
                 txn.status != TxStatus.EXCLUDED &&
+                    // 여기는 확인 필요도 세므로, 원 거래가 **제외**된 경우만 취소를 뺀다.
+                    txn.relatedTransactionId?.let { byId[it] }?.status != TxStatus.EXCLUDED &&
                     txn.foreignAmountMinor != null &&
                     txn.currency.isNotBlank() &&
                     txn.currency != "KRW" &&
@@ -222,6 +275,8 @@ object Aggregator {
         val coveredByInitial: List<Txn>,
         /** 이번 주기 자동 반영이지만 사용자가 '목표 추적 포함'을 끈 거래. */
         val notCountedTowardTarget: List<Txn>,
+        /** 원 거래가 합계에 없어(제외 · 확인 필요 · 목표 추적 제외) 함께 빠진 취소. */
+        val cancelOfUncountedOrigin: List<Txn>,
         /** 이 카드에 붙은 확인 필요 거래. 주기와 무관하게 처리가 필요하므로 전부 보여 준다. */
         val pending: List<Txn>,
         /** 이번 주기에 제외 처리한 거래. */
@@ -236,13 +291,16 @@ object Aggregator {
         val mine = txns.filter { it.cardId == card.id }
         val inCycle = mine.filter { window.contains(effectiveTime(it)) }
         val auto = inCycle.filter { it.status == TxStatus.AUTO }
+        val byId = txns.associateBy { it.id }
+        val counting = auto.filter { counts(it, byId) { t -> t.countsTowardTarget } }
         return CardBreakdown(
             progress = progress,
-            counted = auto.filter { it.countsTowardTarget && isAfterInitialBaseline(it, card) },
-            coveredByInitial = auto.filter {
-                progress.initialApplied != 0L && it.countsTowardTarget && !isAfterInitialBaseline(it, card)
+            counted = counting.filter { isAfterInitialBaseline(it, card) },
+            coveredByInitial = counting.filter {
+                progress.initialApplied != 0L && !isAfterInitialBaseline(it, card)
             },
-            notCountedTowardTarget = auto.filter { !it.countsTowardTarget },
+            notCountedTowardTarget = auto.filter { originOf(it, byId) == null && !it.countsTowardTarget },
+            cancelOfUncountedOrigin = auto.filter { originOf(it, byId) != null && it !in counting },
             pending = mine.filter { it.status == TxStatus.PENDING },
             excluded = inCycle.filter { it.status == TxStatus.EXCLUDED },
             lastCollectedAt = mine

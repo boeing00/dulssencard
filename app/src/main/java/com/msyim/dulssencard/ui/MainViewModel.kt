@@ -14,6 +14,7 @@ import com.msyim.dulssencard.data.model.SourceApp
 import com.msyim.dulssencard.data.model.TxSource
 import com.msyim.dulssencard.data.model.TxStatus
 import com.msyim.dulssencard.data.model.Txn
+import com.msyim.dulssencard.domain.Aggregator
 import com.msyim.dulssencard.domain.Cycle
 import com.msyim.dulssencard.domain.Money
 import com.msyim.dulssencard.domain.Times
@@ -394,15 +395,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val editingId = _state.value.editingCardId
         viewModelScope.launch {
             val existing = editingId?.let { repository.card(it) }
-            // 기준 시각은 **저장하는 지금**이다. 이 시각 이전 거래는 이미 초기값에 들어 있다.
-            // 값을 바꾸지 않았으면 기존 기준 시각을 유지해, 저장만 눌렀다고 해서
-            // 그 사이 들어온 거래가 합계에서 사라지지 않게 한다.
-            val initialChanged = initial != (existing?.initialAmount ?: 0L)
-            val stamp = when {
-                initial == 0L -> 0L
-                initialChanged || existing?.initialAmountAt == 0L -> System.currentTimeMillis()
-                else -> existing?.initialAmountAt ?: System.currentTimeMillis()
-            }
+            // 기준 시각 규칙은 Aggregator.initialAmountAtOnSave 주석 참고.
+            val stamp = Aggregator.initialAmountAtOnSave(existing, initial, form.startDay)
             repository.upsertCard(
                 Card(
                     id = editingId ?: UUID.randomUUID().toString(),
@@ -662,16 +656,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 제외한 거래 영구 삭제. 직후 4.2초 동안 되돌릴 수 있다. 상세 화면에서 지웠으면 목록으로 돌아간다. */
-    fun deleteExcluded(txns: List<Txn>) {
+    /** 합계에 없는 거래(제외 · 확인 필요) 영구 삭제. 직후 4.2초 동안 되돌릴 수 있다. 상세 화면에서 지웠으면 목록으로 돌아간다. */
+    fun deleteUncounted(txns: List<Txn>) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
-            val deleted = repository.deleteExcludedTxns(txns.map { it.id })
+            val deleted = repository.deleteUncountedTxns(txns.map { it.id })
             if (_state.value.screen == Screen.DETAIL && txns.any { it.id == _state.value.selectedTxnId }) {
                 _state.value = _state.value.copy(screen = Screen.INBOX)
             }
             say(
-                if (deleted == 0) "지울 수 있는 제외 거래가 없습니다" else "제외된 거래 ${deleted}건을 삭제했습니다",
+                if (deleted == 0) "지울 수 있는 거래가 없습니다" else "거래 ${deleted}건을 삭제했습니다",
                 undoable = deleted > 0,
             )
         }

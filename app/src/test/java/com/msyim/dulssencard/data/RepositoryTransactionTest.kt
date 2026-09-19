@@ -253,7 +253,7 @@ class RepositoryTransactionTest {
         val gone = db.txnDao().byId("gone")!!
         repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
 
-        val deleted = repo.deleteExcludedTxns(listOf("keep", "gone"))
+        val deleted = repo.deleteUncountedTxns(listOf("keep", "gone"))
 
         assertEquals(1, deleted)
         assertNotNull("합계에 들어간 거래가 지워졌다", db.txnDao().byId("keep"))
@@ -271,8 +271,82 @@ class RepositoryTransactionTest {
             origin.copy(id = "cancel", direction = TxDirection.CANCEL, status = TxStatus.AUTO,
                 messageFingerprint = "fp-cancel", relatedTransactionId = "origin"),
         )
-        repo.deleteExcludedTxns(listOf("origin"))
-        assertNull("취소가 없는 거래를 가리킨다", db.txnDao().byId("cancel")!!.relatedTransactionId)
+        repo.deleteUncountedTxns(listOf("origin"))
+        val cancel = db.txnDao().byId("cancel")!!
+        assertNull("취소가 없는 거래를 가리킨다", cancel.relatedTransactionId)
+        // 원 거래는 합계에 없던 거래다. 연결만 끊고 두면 원 거래 없는 취소가 되어 합계를 음수로 끌어내린다.
+        assertEquals("제외한 거래의 취소가 합계에 남았다", TxStatus.EXCLUDED, cancel.status)
+    }
+
+    @Test
+    fun `취소를 원 거래에 이으면 원 거래의 카드로 옮긴다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        repo.upsertCard(shinhan.copy(id = "c2", nickname = "신한 다른 카드", matchKeywords = listOf("신한2")))
+        seedTxn(id = "origin", cardId = "c1", amount = 20_000)
+        seedTxn(id = "cancel", cardId = "c2", amount = 20_000)
+        val cancel = db.txnDao().byId("cancel")!!.copy(direction = TxDirection.CANCEL)
+        db.txnDao().update(cancel)
+        val linked = repo.linkCancel(cancel, db.txnDao().byId("origin")!!)
+        assertEquals("c1", linked.cardId)
+    }
+
+    @Test
+    fun `자동 연결은 같은 카드의 승인을 먼저 고른다`() = runBlocking {
+        // 같은 카드사 카드 둘로 같은 금액을 결제했다. 시각만 보면 나중 결제(다른 카드)에 붙는다.
+        repo.upsertCard(shinhan)
+        seedTxn(id = "mine", cardId = "c1", amount = 84_300)
+        val later = db.txnDao().byId("mine")!!.copy(
+            id = "other", cardId = "c2", messageFingerprint = "fp-other",
+            occurredAt = at(2026, 9, 7, 12, 0), receivedAt = at(2026, 9, 7, 12, 0),
+        )
+        db.txnDao().insertIgnoringDuplicates(later)
+        val found = db.txnDao().findCancelOrigin(84_300, "SHINHAN", at(2026, 9, 8, 20, 0), "c1")
+        assertEquals("mine", found!!.id)
+        // 카드를 모르면 예전처럼 가장 최근 것.
+        assertEquals("other", db.txnDao().findCancelOrigin(84_300, "SHINHAN", at(2026, 9, 8, 20, 0), null)!!.id)
+    }
+
+    @Test
+    fun `확인 필요 거래도 결과함에서 바로 지운다`() = runBlocking {
+        // 결제가 아닌 알림이 잡혔을 때, 제외를 한 번 거치지 않고 치운다. 합계에 없던 거래라 숫자는 안 바뀐다.
+        repo.upsertCard(shinhan)
+        seedTxn(id = "junk", amount = 1_000_000)
+        val junk = db.txnDao().byId("junk")!!
+        db.txnDao().update(junk.copy(status = TxStatus.PENDING, pendingReason = PendingReason.IMAGE_IMPORT))
+        assertEquals(1, repo.deleteUncountedTxns(listOf("junk")))
+        assertNull(db.txnDao().byId("junk"))
+    }
+
+    @Test
+    fun `지운 확인 필요 거래를 가리키던 취소도 제외한다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "origin", amount = 20_000)
+        val origin = db.txnDao().byId("origin")!!
+        db.txnDao().update(origin.copy(status = TxStatus.PENDING, pendingReason = PendingReason.IMAGE_IMPORT))
+        db.txnDao().insertIgnoringDuplicates(
+            origin.copy(id = "cancel", direction = TxDirection.CANCEL, status = TxStatus.AUTO,
+                pendingReason = null, messageFingerprint = "fp-cancel", relatedTransactionId = "origin"),
+        )
+        repo.deleteUncountedTxns(listOf("origin"))
+        assertEquals(TxStatus.EXCLUDED, db.txnDao().byId("cancel")!!.status)
+    }
+
+    @Test
+    fun `지운 거래와 무관한 취소는 그대로 둔다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "origin", amount = 20_000)
+        seedTxn(id = "other", amount = 30_000)
+        val origin = db.txnDao().byId("origin")!!
+        db.txnDao().update(origin.copy(status = TxStatus.EXCLUDED))
+        val other = db.txnDao().byId("other")!!
+        db.txnDao().insertIgnoringDuplicates(
+            other.copy(id = "cancel", direction = TxDirection.CANCEL, status = TxStatus.AUTO,
+                messageFingerprint = "fp-cancel", relatedTransactionId = "other"),
+        )
+        repo.deleteUncountedTxns(listOf("origin"))
+        val cancel = db.txnDao().byId("cancel")!!
+        assertEquals("other", cancel.relatedTransactionId)
+        assertEquals(TxStatus.AUTO, cancel.status)
     }
 
     @Test
@@ -282,7 +356,7 @@ class RepositoryTransactionTest {
         val gone = db.txnDao().byId("gone")!!
         repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
         crashAt("deleteExcluded:beforeDelete")
-        expectCrash { repo.deleteExcludedTxns(listOf("gone")) }
+        expectCrash { repo.deleteUncountedTxns(listOf("gone")) }
         assertNotNull(db.txnDao().byId("gone"))
         assertEquals("변경 기록만 사라졌다", 1, db.adjustmentDao().all().size)
     }
@@ -294,7 +368,7 @@ class RepositoryTransactionTest {
         val gone = db.txnDao().byId("gone")!!
         repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
         val snapshot = repo.snapshot()
-        repo.deleteExcludedTxns(listOf("gone"))
+        repo.deleteUncountedTxns(listOf("gone"))
         repo.restore(snapshot)
         assertEquals(TxStatus.EXCLUDED, db.txnDao().byId("gone")!!.status)
     }

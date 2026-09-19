@@ -223,4 +223,53 @@ class InitialAmountTest {
         val c = card(initialAmount = 1_200_000L, initialAmountAt = at(2026, 9, 8, 15, 0))
         assertEquals(true, Aggregator.cardProgress(c, emptyList(), now).complete)
     }
+
+    // ------------------------------------------------------- 카드 편집 저장 시 기준 시각
+
+    @Test
+    fun `값도 시작일도 그대로면 기준 시각을 유지한다`() {
+        // 저장만 눌렀다고 기준이 지금으로 밀리면 그 사이 들어온 거래가 초기값 안으로 빨려 들어가 사라진다.
+        val base = at(2026, 9, 8, 10, 0)
+        val c = card(initialAmount = 320_000L, initialAmountAt = base)
+        assertEquals(base, Aggregator.initialAmountAtOnSave(c, 320_000L, 1, now))
+    }
+
+    @Test
+    fun `값을 바꾸면 기준 시각은 지금이다`() {
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 9, 8, 10, 0))
+        assertEquals(now.toEpochMilli(), Aggregator.initialAmountAtOnSave(c, 350_000L, 1, now))
+    }
+
+    @Test
+    fun `새 주기에 지난달과 같은 금액을 넣으면 기준 시각을 새로 찍는다`() {
+        // 편집 화면은 지난 주기 초기값을 빈칸으로 보여 준다. 사용자가 이번 달 금액을 넣었는데
+        // 그게 우연히 지난달과 같으면 "안 바뀜"으로 판정돼 기준 시각이 지난 주기에 남고,
+        // 방금 넣은 초기값이 0 으로 읽힌다.
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 8, 20, 10, 0))
+        val stamp = Aggregator.initialAmountAtOnSave(c, 320_000L, 1, now)
+        assertEquals(now.toEpochMilli(), stamp)
+        assertEquals(320_000L, Aggregator.cardProgress(c.copy(initialAmountAt = stamp), emptyList(), now).spent)
+    }
+
+    @Test
+    fun `주기 시작일을 바꾸면 기준 시각을 새로 찍는다`() {
+        // 시작일 1 → 5 로 바꾸면 9/3 에 넣은 기준이 새 주기 [9/5, 10/5) 밖으로 밀려
+        // 초기값이 통째로 사라진다. 저장하는 지금을 기준으로 삼아 입력칸에 보이던 금액을 살린다.
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 9, 3, 10, 0))
+        val stamp = Aggregator.initialAmountAtOnSave(c, 320_000L, 5, now)
+        assertEquals(now.toEpochMilli(), stamp)
+        val saved = c.copy(cycleStartDay = 5, initialAmountAt = stamp)
+        assertEquals(320_000L, Aggregator.cardProgress(saved, emptyList(), now).spent)
+    }
+
+    @Test
+    fun `초기값을 비우면 기준 시각도 끈다`() {
+        val c = card(initialAmount = 320_000L, initialAmountAt = at(2026, 9, 8, 10, 0))
+        assertEquals(0L, Aggregator.initialAmountAtOnSave(c, 0L, 1, now))
+    }
+
+    @Test
+    fun `새 카드는 지금을 기준으로 삼는다`() {
+        assertEquals(now.toEpochMilli(), Aggregator.initialAmountAtOnSave(null, 100_000L, 1, now))
+    }
 }

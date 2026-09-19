@@ -48,8 +48,14 @@ class AutoBackupStore(
             }
             .sortedByDescending { it.createdAt }
 
-    fun read(entry: Entry): ByteArray =
-        BackupCrypto.decrypt(entry.file.readBytes(), BackupCrypto.Key.Device(keyProvider()))
+    fun read(entry: Entry): ByteArray {
+        // 크기는 **읽기 전에** 본다. decrypt 의 상한 검사는 이미 전부 메모리에 올린 뒤라, 손상돼 부푼 파일이면
+        // 거기까지 가기 전에 메모리가 바닥난다.
+        if (entry.file.length() > BackupCrypto.MAX_FILE_BYTES) {
+            throw BackupCrypto.BackupException(BackupCrypto.Failure.TooLarge)
+        }
+        return BackupCrypto.decrypt(entry.file.readBytes(), BackupCrypto.Key.Device(keyProvider()))
+    }
 
     /** 자동 백업 파일을 모두 지운다. 남은 임시 파일도. */
     fun deleteAll() {
