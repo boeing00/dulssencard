@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -187,7 +189,16 @@ fun InboxScreen(
         }
 
         if (visible.isEmpty()) {
-            item { EmptyInbox() }
+            item {
+                EmptyInbox(
+                    tab = tab,
+                    filtered = cardFilter != null || thisCycleOnly,
+                    onClearFilters = {
+                        if (cardFilter != null) onSelectCard(null)
+                        if (thisCycleOnly) onToggleThisCycle()
+                    },
+                )
+            }
         } else {
             items(visible, key = { it.id }) { txn ->
                 TxnRow(
@@ -329,7 +340,7 @@ private fun TxnRow(
                 if (txn.status == TxStatus.PENDING) {
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (txn.cardId != null) QuickAction("반영", Ds.ink, onConfirm)
+                        if (txn.cardId != null) QuickAction("집계 확정", Ds.ink, onConfirm)
                         QuickAction(if (txn.cardId == null) "카드 지정" else "카드 변경", Ds.ink, onAssign)
                         QuickAction("제외", Ds.accent, onExclude)
                         // 결제가 아닌 알림이 잡혔을 때 제외를 한 번 거치지 않고 바로 치운다.
@@ -357,18 +368,30 @@ private fun amountColor(txn: Txn): Color = when {
 }
 
 @Composable
-private fun EmptyInbox() {
+private fun EmptyInbox(tab: InboxTab, filtered: Boolean, onClearFilters: () -> Unit) {
+    // 필터 때문에 비었는지, 정말 처리할 게 없는지 구분한다. 구분이 없으면 필터를 건 줄 잊은 사용자가
+    // "결제가 안 잡힌다"고 오해한다.
+    val (title, body) = when {
+        filtered -> "지금 필터에 맞는 거래가 없습니다" to "카드·주기 필터를 풀면 다른 거래가 보일 수 있습니다."
+        tab == InboxTab.PENDING -> "확인할 거래가 없습니다" to "애매한 결제가 들어오면 여기에 모입니다. 나머지는 자동으로 집계됩니다."
+        tab == InboxTab.EXCLUDED -> "제외한 거래가 없습니다" to "실적에서 뺀 거래가 여기에 모입니다."
+        else -> "아직 거래가 없습니다" to "새 결제 문자나 카드사 앱 알림이 도착하면 여기에 정리됩니다."
+    }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("해당하는 거래가 없습니다", style = DsType.listPrimary, textAlign = TextAlign.Center)
+        Text(title, style = DsType.listPrimary, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
         Text(
-            "새 결제 문자나 카드사 앱 알림이 도착하면 여기에 정리됩니다.",
+            body,
             style = DsType.listSecondary.copy(fontSize = 12.5.sp),
             textAlign = TextAlign.Center,
         )
+        if (filtered) {
+            Spacer(Modifier.height(8.dp))
+            InlineLink("필터 풀기", onClearFilters)
+        }
     }
 }
 
@@ -376,10 +399,13 @@ private fun EmptyInbox() {
 private fun QuickAction(label: String, color: Color, onClick: () -> Unit) {
     Box(
         Modifier
+            // 글자는 작아도 누르는 영역은 44dp 를 지킨다. 목록에서 바로 처리하는 버튼이라 잘못 누르면 곤란하다.
+            .heightIn(min = Ds.minTouchTarget)
             .clip(RoundedCornerShape(Ds.radius))
             .border(Ds.hairline, color, RoundedCornerShape(Ds.radius))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(label, style = DsType.listPrimary.copy(fontSize = 13.sp, color = color))
     }

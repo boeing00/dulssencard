@@ -152,7 +152,7 @@ enum class CollectionGap(val title: String, val subtitle: String) {
     NONE("", ""),
     DISABLED(
         "제한 모드 — 새 결제가 자동으로 잡히지 않습니다",
-        "설정에서 자동 집계를 켜세요",
+        "눌러서 설정에서 자동 집계를 켜세요",
     ),
     NO_NOTIFICATION_ACCESS(
         "알림 접근이 꺼져 있습니다",
@@ -160,11 +160,11 @@ enum class CollectionGap(val title: String, val subtitle: String) {
     ),
     NO_SOURCE_APPS(
         "읽을 앱을 아직 고르지 않았습니다",
-        "설정 > 알림 소스에서 카드사 앱과 문자 앱을 켜세요",
+        "눌러서 카드사 앱과 문자 앱을 켜세요",
     ),
     SMS_APP_OFF(
         "결제 문자를 못 읽고 있습니다",
-        "설정 > 알림 소스에서 문자 앱을 켜면 결제 문자도 잡힙니다",
+        "눌러서 문자 앱을 켜면 결제 문자도 잡힙니다",
     ),
 }
 
@@ -467,7 +467,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun confirmTxn(txn: Txn) = mutate(
         txn = txn,
         changeType = ChangeType.CONFIRM,
-        message = "집계에 반영했습니다",
+        message = "집계를 확정했습니다",
     ) { it.copy(status = TxStatus.AUTO, pendingReason = null) }
 
     fun excludeTxn(txn: Txn) = mutate(

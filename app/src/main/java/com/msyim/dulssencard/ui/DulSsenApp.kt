@@ -164,7 +164,14 @@ private fun ScreenContent(
                 onOpenPending = { viewModel.openInboxFor(null, InboxTab.PENDING) },
                 onToggleSort = viewModel::toggleSort,
                 onCardClick = { viewModel.openCard(it, Screen.HOME) },
-                onOpenSettings = { viewModel.go(Screen.SETTINGS) },
+                onFixCollectionGap = { gap ->
+                    when (gap) {
+                        CollectionGap.NO_NOTIFICATION_ACCESS ->
+                            context.startActivity(SourceGate.notificationAccessSettingsIntent())
+                        CollectionGap.NO_SOURCE_APPS, CollectionGap.SMS_APP_OFF -> viewModel.go(Screen.SOURCES)
+                        CollectionGap.DISABLED, CollectionGap.NONE -> viewModel.go(Screen.SETTINGS)
+                    }
+                },
                 recentCollection = recent,
                 lastCollectedByCard = lastByCard,
                 onSetInitialAmount = viewModel::setInitialAmount,

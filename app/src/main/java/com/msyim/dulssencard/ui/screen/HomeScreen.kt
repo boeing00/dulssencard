@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,7 +66,7 @@ fun HomeScreen(
     onOpenPending: () -> Unit,
     onToggleSort: () -> Unit,
     onCardClick: (Card) -> Unit,
-    onOpenSettings: () -> Unit,
+    onFixCollectionGap: (CollectionGap) -> Unit,
     recentCollection: List<RecentCollection>,
     lastCollectedByCard: Map<String, Long>,
     onSetInitialAmount: (Card, Long) -> Unit,
@@ -88,7 +90,7 @@ fun HomeScreen(
         }
 
         if (collectionGap != CollectionGap.NONE) {
-            item { CollectionGapBanner(collectionGap, onOpenSettings) }
+            item { CollectionGapBanner(collectionGap) { onFixCollectionGap(collectionGap) } }
         } else {
             // 수집 경로가 다 열려 있어도 **실제로 알림이 오고 있는지**는 따로다. 공백을 늦게 알아채지 않게 보여 준다.
             item { RecentCollectionRow(recentCollection, onOpenSources) }
@@ -131,7 +133,7 @@ fun HomeScreen(
 
     editingInitial?.let { row ->
         AmountEditDialog(
-            title = "${row.card.nickname} 기준액 다시 맞추기",
+            title = "${row.card.nickname} 초기 사용액 다시 맞추기",
             message = "카드사 앱에서 확인한 이번 달 이용금액을 넣으세요. 이 시각 이전 결제는 이 금액에 들어 있다고 봅니다. " +
                 "비워 두고 저장하면 초기 사용액을 끄고 알림만 셉니다.",
             initial = row.initialApplied,
@@ -344,7 +346,7 @@ private fun ForeignSpendRow(items: List<Aggregator.ForeignSpend>) {
  * 수집 경로가 반쪽만 열렸을 때. 사용자가 "왜 어떤 결제는 안 잡히지?"를 겪기 전에 알려 준다.
  */
 @Composable
-private fun CollectionGapBanner(gap: CollectionGap, onOpenSettings: () -> Unit) {
+private fun CollectionGapBanner(gap: CollectionGap, onFix: () -> Unit) {
     val shape = RoundedCornerShape(Ds.radiusBanner)
     Row(
         Modifier
@@ -353,7 +355,7 @@ private fun CollectionGapBanner(gap: CollectionGap, onOpenSettings: () -> Unit) 
             .clip(shape)
             .background(Ds.paper2)
             .border(Ds.hairline, Ds.line, shape)
-            .clickable(onClick = onOpenSettings)
+            .clickable(onClick = onFix)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -438,7 +440,7 @@ private fun CardRow(
                 buildString {
                     append("남은 ${row.daysRemaining}일")
                     // 직접 입력한 몫이 있으면 밝힌다. 숫자의 출처를 알아야 사용자가 다시 맞출 수 있다.
-                    if (row.initialApplied != 0L) append(" · 기준액 ${Money.won(row.initialApplied)} 포함")
+                    if (row.initialApplied != 0L) append(" · 초기 사용액 ${Money.won(row.initialApplied)} 포함")
                     append(" · ")
                     append(lastCollectedAt?.let { "수집 ${Times.ago(it)}" } ?: "수집 기록 없음")
                 },
@@ -448,11 +450,13 @@ private fun CardRow(
             )
             // 카드사 앱 총액이 달라졌을 때 카드 편집까지 들어가지 않고 여기서 바로 맞춘다.
             Text(
-                "기준액 수정",
+                "초기 사용액 수정",
                 style = DsType.link.copy(fontSize = 12.sp),
                 modifier = Modifier
+                    .heightIn(min = Ds.minTouchTarget)
                     .clickable(onClick = onEditInitial)
-                    .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
+                    .padding(start = 8.dp)
+                    .wrapContentHeight(),
             )
         }
     }
