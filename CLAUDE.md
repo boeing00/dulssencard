@@ -303,7 +303,7 @@ OCR 오인식이 잦아 AI 로 대체하는 안을 검토했고, **셋 다 지�
 
 ### 출시 전
 
-- [ ] `keystore.properties` + 서명 키 — **위임 금지, 사용자와 직접**
+- [x] 업로드 키 — 2026-09-19. `C:\Users\moons\keystores\dulssencard-upload.jks`(alias `dulssencard-upload`, RSA 4096, CN=DulSsenCard Upload). 비밀번호는 `keystore.properties`(git 제외)에만. Play 앱 서명을 쓰므로 이건 **업로드 키**다. 인증서 SHA-256 `4f9eb8bc…abd560`. `./gradlew :app:bundleRelease` → `app/build/outputs/bundle/release/app-release.aab`
 - [x] 런처 아이콘 — 완료. **다시 만들 때 Image Asset 마법사를 쓰지 말 것.**
       `python store/make_icons.py` 로 다시 뽑는다. Play 512px 은 `store/ic_playstore_512.png`
 - [ ] Play 심사 자료: 알림 접근의 핵심 기능성 · 허용 목록 · 미전송 (`README.md` §5)
@@ -485,7 +485,17 @@ Gemini CLI 는 파일을 많이 읽는 긴 질의에서 **출력 없이 멈춘�
 ### Play Console 에서 사용자가 할 일 (위임 금지 — 결제 · 서명)
 
 1. 판매자(결제) 프로필 등록 — 유료 상품을 팔려면 필요하다.
-2. 앱 만들기(`com.msyim.dulssencard`) → **서명한 릴리스 AAB 를 내부 테스트 트랙에 먼저 올린다.**
+2. 앱 만들기(`com.msyim.dulssencard`) → **서명한 릴리스 AAB 를 내부 테스트 트랙에 먼저 올린다.** (AAB 준비됨 — §7 업로드 키)
    BILLING 권한이 든 빌드가 한 번 올라가야 인앱 상품을 만들 수 있다.
 3. 인앱 상품: ID `pro_unlock`(코드 `FreeTier.PRO_PRODUCT_ID` 와 같아야 한다), 일회성, 2,900원, 활성화.
 4. 라이선스 테스터에 본인 계정 → 내부 테스트로 설치해 구매 · 구매 복원 · 환불 후 무료 복귀를 확인.
+
+### 업로드 키를 만들 때 밟은 함정 (2026-09-19)
+
+- keytool 은 비밀번호를 **보이지 않게** 받아 오타가 나기 쉽다. 메모장에 따로 적었다가 `keystore password was
+  incorrect` 로 빌드가 실패했다. 해결: 비밀번호를 먼저 `keystore.properties` 에 적고, keytool 이 거기서 읽게
+  `-storepass:env` / `-keypass:env` 로 넘긴다(명령은 사용자가 직접 실행).
+- 빌드한 뒤 Gradle 데몬 · 워커(Java)가 `.jks` 를 **잠가 둔다.** `gradlew --stop` 만으로 안 풀릴 때가 있다.
+  남은 java.exe 가 끝나야 지울 수 있다.
+- 릴리스(R8) APK 를 에뮬레이터에서 실행해 확인함: 시작 · 카드 저장(SQLCipher) · 결제 연결 · 설정 화면 크래시 없음.
+
