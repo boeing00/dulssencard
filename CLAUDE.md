@@ -388,7 +388,7 @@ PRD 와 이 문서가 어긋나면 **PRD 가 무엇을·이 문서가 어떻게*
 
 **남은 것**: GitHub 은 어느 브랜치에도 안 붙은 옛 커밋을 **옛 SHA 로 직접 열면** 한동안 계속 보여 준다
 (재작성 직후 확인). 옛 Actions 실행 기록이 그 SHA 를 가리킨다. 완전히 지우려면 옛 실행 기록을 지우고
-GitHub Support 에 "Remove cached views / dangling commits" 를 요청해야 한다.
+GitHub Support 에 "Remove cached views / dangling commits" 를 요청해야 한다. **2026-09-19 티켓 제출함 — 처리 확인은 `gh api repos/boeing00/dulssencard/commits/b1a4b37` 가 404 인지로 본다.**
 **다른 사람이 이 저장소를 clone 해 두었다면 그 사본은 막을 수 없다**(포크는 0개였다).
 
 이력을 다시 썼으므로 **재작성 전 clone 에서 push 하면 옛 이력이 되살아난다.** 옛 사본은 버리고 새로 clone 할 것.
