@@ -28,7 +28,6 @@ import com.msyim.dulssencard.domain.Times
 import com.msyim.dulssencard.ui.component.AmountEditDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.SpanStyle
@@ -119,7 +118,7 @@ fun HomeScreen(
 
         item {
             Footnote(
-                "완료된 카드는 하단으로 이동하며 낮은 대비로 표시됩니다. " +
+                "완료된 카드는 하단으로 이동합니다. " +
                     "카드사 공식 인정 여부는 앱이 판정하지 않습니다.",
                 Modifier.padding(
                     start = Ds.screenPadding,
@@ -399,8 +398,8 @@ private fun CardRow(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            // 완료된 카드는 낮은 대비로 처리한다.
-            .alpha(if (row.complete) 0.5f else 1f)
+            // 완료된 카드는 하단으로 내리고 진행 바·배지 색으로만 구분한다. 행 전체를 흐리면
+            // 카드명·금액까지 대비 기준 아래로 떨어져 읽기 어렵다.
             .padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 16.dp, bottom = 17.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -439,8 +438,15 @@ private fun CardRow(
             Text(
                 buildString {
                     append("남은 ${row.daysRemaining}일")
-                    // 직접 입력한 몫이 있으면 밝힌다. 숫자의 출처를 알아야 사용자가 다시 맞출 수 있다.
-                    if (row.initialApplied != 0L) append(" · 초기 사용액 ${Money.won(row.initialApplied)} 포함")
+                    // 합계가 어디서 왔는지 밝힌다. 숫자의 출처를 알아야 사용자가 다시 맞출 수 있다.
+                    append(" · ")
+                    append(
+                        if (row.initialApplied != 0L) {
+                            "초기 사용액 ${Money.won(row.initialApplied)} + 알림 ${row.countedCount}건"
+                        } else {
+                            "알림 ${row.countedCount}건"
+                        },
+                    )
                     append(" · ")
                     append(lastCollectedAt?.let { "수집 ${Times.ago(it)}" } ?: "수집 기록 없음")
                 },

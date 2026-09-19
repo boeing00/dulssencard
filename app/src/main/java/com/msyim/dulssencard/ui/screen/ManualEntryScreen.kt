@@ -45,6 +45,8 @@ fun ManualEntryScreen(
     onChange: ((ManualForm) -> ManualForm) -> Unit,
     onSave: () -> Unit,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -53,7 +55,7 @@ fun ManualEntryScreen(
             .verticalScroll(rememberScrollState())
             .padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 18.dp, bottom = 30.dp),
     ) {
-        Text("← 뒤로", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
+        Text("← $backLabel", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
         Spacer(Modifier.height(14.dp))
         Text("거래 직접 입력", style = DsType.h2)
         Spacer(Modifier.height(18.dp))

@@ -37,7 +37,20 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-enum class Screen { ONBOARD, HOME, INBOX, DETAIL, CARDS, EDIT, SETTINGS, SOURCES, CARD_DETAIL, MANUAL, BACKUP }
+/** 화면. [label] 은 탭 이름이자 하위 화면 위 "← ○○" 에 쓰는 이름이다 — 같은 곳은 어디서나 같은 이름으로 부른다. */
+enum class Screen(val label: String) {
+    ONBOARD("시작하기"),
+    HOME("홈"),
+    INBOX("거래"),
+    DETAIL("거래 상세"),
+    CARDS("카드"),
+    EDIT("카드 편집"),
+    SETTINGS("설정"),
+    SOURCES("알림 소스"),
+    CARD_DETAIL("카드 상세"),
+    MANUAL("직접 입력"),
+    BACKUP("백업"),
+}
 
 enum class InboxTab { PENDING, ALL, EXCLUDED }
 
@@ -168,6 +181,9 @@ enum class CollectionGap(val title: String, val subtitle: String) {
     ),
 }
 
+/** 하단 탭 화면. 여기로 가면 뒤로가기 기록을 비운다. */
+private val TOP_LEVEL = setOf(Screen.HOME, Screen.INBOX, Screen.CARDS, Screen.SETTINGS, Screen.ONBOARD)
+
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = DulSsenRepository.get(app)
@@ -264,33 +280,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 화면 이동
 
-    /** 화면을 옮길 때 스낵바를 즉시 닫는다(README: 화면 전환 시 스낵바 즉시 닫기). */
-    fun go(screen: Screen) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(screen = screen, toast = null)
+    /**
+     * 뒤로가기 기록. 하위 화면(거래 상세 · 카드 상세 · 편집 · 직접 입력 · 알림 소스 · 백업)으로 갈 때
+     * 지금 화면을 쌓고, 탭 화면으로 가면 비운다. 뒤로가기는 **들어온 길을 그대로 되짚는다** —
+     * 전에는 화면마다 돌아갈 곳이 고정돼 있어, 카드 상세에서 연 거래를 닫으면 결과함으로 가는 식이었다.
+     */
+    private val history = ArrayDeque<Screen>()
+
+    /** 기록 없이 들어온 하위 화면의 부모(예: 알림에서 바로 연 거래 상세). */
+    private fun parentOf(screen: Screen): Screen = when (screen) {
+        Screen.DETAIL, Screen.MANUAL -> Screen.INBOX
+        Screen.EDIT -> Screen.CARDS
+        Screen.SOURCES, Screen.BACKUP -> Screen.SETTINGS
+        else -> Screen.HOME
     }
 
-    fun openInbox(tab: InboxTab) {
+    /**
+     * 화면을 옮긴다. 스낵바는 즉시 닫는다(README: 화면 전환 시 스낵바 즉시 닫기).
+     * [backTo][UiState.backTo] 는 뒤로가기가 실제로 갈 곳이다 — 화면 위 "← ○○" 표시가 이 값을 쓴다.
+     */
+    private fun navigate(screen: Screen, update: (UiState) -> UiState = { it }) {
         toastJob?.cancel()
-        _state.value = _state.value.copy(screen = Screen.INBOX, inboxTab = tab, toast = null)
+        val current = _state.value.screen
+        if (screen in TOP_LEVEL) {
+            history.clear()
+        } else if (current != screen) {
+            history.addLast(current)
+        }
+        val backTo = history.lastOrNull() ?: parentOf(screen)
+        _state.value = update(_state.value).copy(screen = screen, backTo = backTo, toast = null)
     }
+
+    fun go(screen: Screen) = navigate(screen)
+
+    fun openInbox(tab: InboxTab) = navigate(Screen.INBOX) { it.copy(inboxTab = tab) }
 
     fun selectInboxTab(tab: InboxTab) {
         _state.value = _state.value.copy(inboxTab = tab)
     }
 
-    fun openTxn(id: String, from: Screen) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.DETAIL,
-            selectedTxnId = id,
-            backTo = from,
-            toast = null,
-        )
-    }
+    fun openTxn(id: String) = navigate(Screen.DETAIL) { it.copy(selectedTxnId = id, cancelCandidates = null) }
 
+    /** 들어온 길을 한 단계 되짚는다. 기록이 없으면 그 화면의 부모로 간다. */
     fun back() {
-        go(_state.value.backTo)
+        toastJob?.cancel()
+        val target = history.removeLastOrNull() ?: parentOf(_state.value.screen)
+        val backTo = history.lastOrNull() ?: parentOf(target)
+        _state.value = _state.value.copy(screen = target, backTo = backTo, toast = null)
     }
 
     fun toggleSort() {
@@ -333,24 +369,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 카드
 
-    fun newCard() {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.EDIT,
-            editingCardId = null,
-            backTo = Screen.CARDS,
-            form = CardForm(),
-            toast = null,
-        )
-    }
+    fun newCard() = navigate(Screen.EDIT) { it.copy(editingCardId = null, form = CardForm()) }
 
-    fun editCard(card: Card) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.EDIT,
+    fun editCard(card: Card) = navigate(Screen.EDIT) {
+        it.copy(
             editingCardId = card.id,
-            backTo = Screen.CARDS,
-            toast = null,
             form = CardForm(
                 nickname = card.nickname,
                 target = Money.grouped(card.trackingTarget),
@@ -377,8 +400,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = _state.value.copy(form = transform(_state.value.form))
     }
 
-    /** [after] 저장 뒤 갈 화면. 온보딩에서는 다음 단계에 머문다. */
-    fun saveCard(after: Screen = Screen.CARDS) {
+    /** [after] 저장 뒤 갈 화면. 온보딩에서는 다음 단계에 머문다. null 이면 들어온 곳으로 돌아간다. */
+    fun saveCard(after: Screen? = null) {
         val form = _state.value.form
         val target = Money.parseAmount(form.target)
         val keywords = splitKeywords(form.keywords)
@@ -413,10 +436,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                 ),
             )
-            _state.value = _state.value.copy(
-                screen = after,
-                form = if (after == Screen.ONBOARD) CardForm() else _state.value.form,
-            )
+            if (after == null) {
+                back()
+            } else {
+                _state.value = _state.value.copy(
+                    screen = after,
+                    form = if (after == Screen.ONBOARD) CardForm() else _state.value.form,
+                )
+            }
             say(if (editingId == null) "카드를 저장했습니다" else "변경을 저장했습니다", undoable = false)
         }
     }
@@ -425,7 +452,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
             repository.deleteCard(card)
-            _state.value = _state.value.copy(screen = Screen.CARDS)
+            // 지운 카드의 상세로 돌아가지 않도록 기록을 비우고 카드 목록으로 간다.
+            go(Screen.CARDS)
             say("${card.nickname} 카드를 지웠습니다 — 거래는 미분류로 남았습니다", undoable = true)
         }
     }
@@ -562,15 +590,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 카드 상세 · 초기 사용액
 
-    fun openCard(card: Card, from: Screen = Screen.HOME) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.CARD_DETAIL,
-            selectedCardId = card.id,
-            backTo = from,
-            toast = null,
-        )
-    }
+    fun openCard(card: Card) = navigate(Screen.CARD_DETAIL) { it.copy(selectedCardId = card.id) }
 
     /**
      * 초기 사용액을 바로 다시 맞춘다(홈·카드 상세). 기준 시각은 지금이다.
@@ -598,26 +618,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 카드 상세의 "확인 필요 N건"에서 결과함으로 넘어갈 때 그 카드로 걸러 둔다. */
-    fun openInboxFor(cardId: String?, tab: InboxTab) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.INBOX,
-            inboxTab = tab,
-            inboxCardFilter = cardId,
-            toast = null,
-        )
-    }
+    fun openInboxFor(cardId: String?, tab: InboxTab) =
+        navigate(Screen.INBOX) { it.copy(inboxTab = tab, inboxCardFilter = cardId) }
 
     // ------------------------------------------------------------- 직접 입력 · 금액 정정
 
-    fun openManualEntry(cardId: String?, from: Screen) {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(
-            screen = Screen.MANUAL,
-            backTo = from,
-            manualForm = ManualForm(cardId = cardId ?: _state.value.cards.singleOrNull()?.id),
-            toast = null,
-        )
+    fun openManualEntry(cardId: String?) = navigate(Screen.MANUAL) {
+        it.copy(manualForm = ManualForm(cardId = cardId ?: it.cards.singleOrNull()?.id))
     }
 
     fun updateManualForm(transform: (ManualForm) -> ManualForm) {
@@ -651,7 +658,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             undoSnapshot = repository.snapshot()
             repository.addManualTxn(form.cardId, signed, direction, occurredAt, form.merchant)
-            _state.value = _state.value.copy(screen = _state.value.backTo)
+            back()
             say("${form.kind.label}: ${Money.won(signed)}", undoable = true)
         }
     }
@@ -662,7 +669,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             undoSnapshot = repository.snapshot()
             val deleted = repository.deleteUncountedTxns(txns.map { it.id })
             if (_state.value.screen == Screen.DETAIL && txns.any { it.id == _state.value.selectedTxnId }) {
-                _state.value = _state.value.copy(screen = Screen.INBOX)
+                back()
             }
             say(
                 if (deleted == 0) "지울 수 있는 거래가 없습니다" else "거래 ${deleted}건을 삭제했습니다",
@@ -718,8 +725,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var importBytes: ByteArray? = null
 
     fun openBackup() {
-        toastJob?.cancel()
-        _state.value = _state.value.copy(screen = Screen.BACKUP, toast = null)
+        navigate(Screen.BACKUP)
         refreshAutoBackups()
     }
 

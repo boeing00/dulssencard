@@ -108,7 +108,7 @@ fun InboxScreen(
                     bottom = 6.dp,
                 ),
             ) {
-                SectionLabel("거래 결과함")
+                SectionLabel("거래")
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

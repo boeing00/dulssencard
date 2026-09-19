@@ -57,6 +57,8 @@ fun BackupScreen(
     autoBackups: List<AutoBackupStore.Entry>,
     passwordProblem: (String, String) -> String?,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     onExport: (Uri, String) -> Unit,
     onImportPicked: (Uri) -> Unit,
     onOpenImport: (String) -> Unit,
@@ -97,7 +99,7 @@ fun BackupScreen(
             .padding(bottom = 30.dp),
     ) {
         Column(Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 18.dp, bottom = 16.dp)) {
-            Text("← 설정", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
+            Text("← $backLabel", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
             Spacer(Modifier.height(14.dp))
             Text("백업", style = DsType.h2)
             Spacer(Modifier.height(8.dp))
@@ -147,7 +149,7 @@ fun BackupScreen(
                     ImportPreview(importStage, onSelectMode)
                     Spacer(Modifier.height(14.dp))
                     PrimaryButton(
-                        if (importStage.mode == ImportPlanner.Mode.REPLACE) "전체 교체 실행" else "병합 실행",
+                        if (importStage.mode == ImportPlanner.Mode.REPLACE) "통째로 바꾸기" else "합치기",
                         { confirmApply = true },
                     )
                     DsTextButton("취소", onCancelImport)
@@ -202,7 +204,7 @@ fun BackupScreen(
                 } else {
                     "같은 결제는 한 건으로 합치고, 더 최근에 고친 쪽을 씁니다. 적용 직전 상태는 자동 백업으로 남습니다."
                 },
-                confirmLabel = if (replace) "교체" else "병합",
+                confirmLabel = if (replace) "바꾸기" else "합치기",
                 destructive = replace,
                 onConfirm = onApplyImport,
                 onDismiss = { confirmApply = false },
@@ -234,8 +236,8 @@ private fun ImportPreview(preview: ImportStage.Preview, onSelectMode: (ImportPla
     )
     Spacer(Modifier.height(12.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        DsChip("병합", preview.mode == ImportPlanner.Mode.MERGE, onClick = { onSelectMode(ImportPlanner.Mode.MERGE) })
-        DsChip("전체 교체", preview.mode == ImportPlanner.Mode.REPLACE, onClick = { onSelectMode(ImportPlanner.Mode.REPLACE) })
+        DsChip("합치기", preview.mode == ImportPlanner.Mode.MERGE, onClick = { onSelectMode(ImportPlanner.Mode.MERGE) })
+        DsChip("통째로 바꾸기", preview.mode == ImportPlanner.Mode.REPLACE, onClick = { onSelectMode(ImportPlanner.Mode.REPLACE) })
     }
     Spacer(Modifier.height(12.dp))
     Column(

@@ -50,6 +50,8 @@ import com.msyim.dulssencard.ui.theme.DsType
 fun CardDetailScreen(
     breakdown: Aggregator.CardBreakdown,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     onOpenTxn: (Txn) -> Unit,
     onSetInitialAmount: (Long) -> Unit,
     onAddManual: () -> Unit,
@@ -64,7 +66,7 @@ fun CardDetailScreen(
     LazyColumn(modifier.fillMaxWidth()) {
         item {
             Column(Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 18.dp)) {
-                Text("← 홈", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
+                Text("← $backLabel", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
                 Spacer(Modifier.height(14.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(card.nickname, style = DsType.h2, modifier = Modifier.weight(1f))

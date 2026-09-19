@@ -64,8 +64,9 @@ fun DulSsenApp(viewModel: MainViewModel = viewModel()) {
                 ScreenContent(state = state, viewModel = viewModel, context = context)
             }
 
-            // 온보딩에서는 내비를 숨긴다.
-            if (state.screen != Screen.ONBOARD) {
+            // 하단 탭은 탭 화면(홈·거래·카드·설정)에서만 보인다. 하위 화면은 위의 "← ○○" 와 시스템
+            // 뒤로가기로 들어온 길을 되짚는다 — 하위 화면에서 탭을 누르면 하던 일을 잃고, 뒤로가기와 뜻이 섞인다.
+            if (state.screen in BOTTOM_TABS) {
                 BottomNav(
                     current = state.screen,
                     pendingCount = state.pendingCount,
@@ -78,7 +79,7 @@ fun DulSsenApp(viewModel: MainViewModel = viewModel()) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = if (state.screen == Screen.ONBOARD) 26.dp else 78.dp)
+                    .padding(bottom = if (state.screen in BOTTOM_TABS) 78.dp else 26.dp)
                     .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
                 DsSnackbar(toast.message, toast.undoable, viewModel::undo)
@@ -93,17 +94,21 @@ private fun ScreenContent(
     viewModel: MainViewModel,
     context: Context,
 ) {
-    if (state.loading) return
+    if (state.loading) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("불러오는 중…", style = DsType.listSecondary)
+        }
+        return
+    }
 
     // 시스템 뒤로가기. 없으면 하위 화면에서 뒤로가기를 눌렀을 때 이전 화면이 아니라 **앱이 종료된다**
     // (에뮬레이터 검증에서 발견). 홈과 온보딩 첫 단계에서만 시스템에 맡겨 앱을 나간다.
     val backTarget: (() -> Unit)? = when (state.screen) {
         Screen.HOME -> null
         Screen.ONBOARD -> if (state.onboardingStep > 0) viewModel::onboardingBack else null
-        Screen.INBOX, Screen.CARDS, Screen.SETTINGS, Screen.CARD_DETAIL -> { { viewModel.go(Screen.HOME) } }
-        Screen.DETAIL, Screen.MANUAL -> viewModel::back
-        Screen.EDIT -> { { viewModel.go(Screen.CARDS) } }
-        Screen.SOURCES, Screen.BACKUP -> { { viewModel.go(Screen.SETTINGS) } }
+        Screen.INBOX, Screen.CARDS, Screen.SETTINGS -> { { viewModel.go(Screen.HOME) } }
+        // 하위 화면은 들어온 길을 그대로 되짚는다(MainViewModel.history).
+        Screen.DETAIL, Screen.MANUAL, Screen.CARD_DETAIL, Screen.EDIT, Screen.SOURCES, Screen.BACKUP -> viewModel::back
     }
     androidx.activity.compose.BackHandler(enabled = backTarget != null) { backTarget?.invoke() }
 
@@ -163,7 +168,7 @@ private fun ScreenContent(
                 onOpenLimitSettings = { viewModel.go(Screen.SETTINGS) },
                 onOpenPending = { viewModel.openInboxFor(null, InboxTab.PENDING) },
                 onToggleSort = viewModel::toggleSort,
-                onCardClick = { viewModel.openCard(it, Screen.HOME) },
+                onCardClick = viewModel::openCard,
                 onFixCollectionGap = { gap ->
                     when (gap) {
                         CollectionGap.NO_NOTIFICATION_ACCESS ->
@@ -187,10 +192,11 @@ private fun ScreenContent(
                 val breakdown = remember(card, state.txns) { Aggregator.cardBreakdown(card, state.txns) }
                 CardDetailScreen(
                     breakdown = breakdown,
-                    onBack = { viewModel.go(Screen.HOME) },
-                    onOpenTxn = { viewModel.openTxn(it.id, Screen.CARD_DETAIL) },
+                    onBack = viewModel::back,
+                    backLabel = state.backTo.label,
+                    onOpenTxn = { viewModel.openTxn(it.id) },
                     onSetInitialAmount = { amount -> viewModel.setInitialAmount(card, amount) },
-                    onAddManual = { viewModel.openManualEntry(card.id, Screen.CARD_DETAIL) },
+                    onAddManual = { viewModel.openManualEntry(card.id) },
                     onEditCard = { viewModel.editCard(card) },
                     onOpenPending = { viewModel.openInboxFor(card.id, InboxTab.PENDING) },
                 )
@@ -207,13 +213,13 @@ private fun ScreenContent(
             onSelectTab = viewModel::selectInboxTab,
             onSelectCard = viewModel::setInboxCardFilter,
             onToggleThisCycle = viewModel::toggleInboxThisCycle,
-            onOpenTxn = { viewModel.openTxn(it.id, Screen.INBOX) },
+            onOpenTxn = { viewModel.openTxn(it.id) },
             onConfirm = viewModel::confirmTxn,
             onExclude = viewModel::excludeTxn,
             onAssignCard = viewModel::moveTxnToCard,
             onAddManual = {
                 val filtered = state.inboxCardFilter?.takeIf { it != InboxFilter.UNASSIGNED }
-                viewModel.openManualEntry(filtered, Screen.INBOX)
+                viewModel.openManualEntry(filtered)
             },
             onRestore = viewModel::restoreTxn,
             onDelete = viewModel::deleteUncounted,
@@ -232,6 +238,7 @@ private fun ScreenContent(
                     cards = state.cards,
                     adjustments = adjustments,
                     onBack = viewModel::back,
+                    backLabel = state.backTo.label,
                     onMoveToCard = { viewModel.moveTxnToCard(txn, it) },
                     onToggleTarget = { viewModel.toggleCountsTowardTarget(txn) },
                     onToggleLimit = { viewModel.toggleCountsTowardLimit(txn) },
@@ -244,7 +251,7 @@ private fun ScreenContent(
                     onLoadCancelCandidates = { viewModel.loadCancelCandidates(txn) },
                     onPickOrigin = { origin -> viewModel.linkCancel(txn, origin) },
                     onDismissCandidates = viewModel::clearCancelCandidates,
-                    onOpenTxn = { viewModel.openTxn(it.id, state.backTo) },
+                    onOpenTxn = { viewModel.openTxn(it.id) },
                     onDelete = { viewModel.deleteUncounted(listOf(txn)) },
                 )
             }
@@ -256,19 +263,21 @@ private fun ScreenContent(
             onChange = viewModel::updateManualForm,
             onSave = viewModel::saveManualEntry,
             onBack = viewModel::back,
+            backLabel = state.backTo.label,
         )
 
         Screen.CARDS -> CardListScreen(
             cards = state.cards,
             onAdd = viewModel::newCard,
-            onEdit = viewModel::editCard,
+            onOpen = viewModel::openCard,
         )
 
         Screen.EDIT -> CardEditScreen(
             form = state.form,
             isNew = state.editingCardId == null,
             existingCard = state.cards.firstOrNull { it.id == state.editingCardId },
-            onBack = { viewModel.go(Screen.CARDS) },
+            onBack = viewModel::back,
+            backLabel = state.backTo.label,
             onChange = viewModel::updateForm,
             onSave = { viewModel.saveCard() },
             onDelete = viewModel::deleteCard,
@@ -301,7 +310,8 @@ private fun ScreenContent(
             autoCollectEnabled = state.autoCollectEnabled,
             defaultSmsPackage = state.defaultSmsPackage,
             onOpenNotificationAccess = { context.startActivity(SourceGate.notificationAccessSettingsIntent()) },
-            onBack = { viewModel.go(Screen.SETTINGS) },
+            onBack = viewModel::back,
+            backLabel = state.backTo.label,
             onToggle = viewModel::setSourceAppEnabled,
         )
 
@@ -310,7 +320,8 @@ private fun ScreenContent(
             importStage = state.importStage,
             autoBackups = state.autoBackups,
             passwordProblem = viewModel::exportPasswordProblem,
-            onBack = { viewModel.go(Screen.SETTINGS) },
+            onBack = viewModel::back,
+            backLabel = state.backTo.label,
             onExport = viewModel::exportTo,
             onImportPicked = viewModel::importPicked,
             onOpenImport = viewModel::openImport,
@@ -325,23 +336,14 @@ private fun ScreenContent(
 /** 알림에서 수집한 거래의 경로. 직접 입력·캡처는 '수집'이 아니다. */
 private val COLLECTED_SOURCES = setOf(TxSource.SMS, TxSource.PUSH, TxSource.KAKAO)
 
-/** 하단 4탭. 결과함 탭에는 확인 필요 건수 배지가 붙는다(0건이면 숨김). */
+/** 하단 탭 화면. 나머지는 하위 화면이라 탭을 숨긴다. */
+private val BOTTOM_TABS = listOf(Screen.HOME, Screen.INBOX, Screen.CARDS, Screen.SETTINGS)
+
+/** 하단 4탭. 거래 탭에는 확인 필요 건수 배지가 붙는다(0건이면 숨김). */
 @Composable
 private fun BottomNav(current: Screen, pendingCount: Int, onSelect: (Screen) -> Unit) {
-    val tabs = listOf(
-        Screen.HOME to "홈",
-        Screen.INBOX to "결과함",
-        Screen.CARDS to "카드",
-        Screen.SETTINGS to "설정",
-    )
-    // 상세·편집·소스는 각각 결과함·카드·설정 탭에 속한 화면으로 표시한다.
-    val activeTab = when (current) {
-        Screen.DETAIL, Screen.MANUAL -> Screen.INBOX
-        Screen.CARD_DETAIL -> Screen.HOME
-        Screen.EDIT -> Screen.CARDS
-        Screen.SOURCES, Screen.BACKUP -> Screen.SETTINGS
-        else -> current
-    }
+    val tabs = BOTTOM_TABS.map { it to it.label }
+    val activeTab = current
 
     Column(
         Modifier

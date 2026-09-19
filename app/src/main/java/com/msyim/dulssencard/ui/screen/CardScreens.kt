@@ -44,7 +44,8 @@ import com.msyim.dulssencard.ui.theme.DsType
 fun CardListScreen(
     cards: List<Card>,
     onAdd: () -> Unit,
-    onEdit: (Card) -> Unit,
+    /** 카드를 누르면 상세로 간다. 편집은 상세의 '카드 설정'에서. */
+    onOpen: (Card) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(modifier.fillMaxWidth()) {
@@ -75,7 +76,7 @@ fun CardListScreen(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onEdit(card) }
+                        .clickable { onOpen(card) }
                         .padding(horizontal = Ds.screenPadding, vertical = 16.dp),
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -103,7 +104,7 @@ fun CardListScreen(
         item {
             Footnote(
                 "동일 키워드를 여러 카드에 저장하면 해당 거래는 자동 반영하지 않고 " +
-                    "확인 결과함으로 이동합니다.",
+                    "거래 탭의 확인 필요로 갑니다.",
                 Modifier.padding(
                     start = Ds.screenPadding,
                     end = Ds.screenPadding,
@@ -127,6 +128,8 @@ fun CardEditScreen(
     isNew: Boolean,
     existingCard: Card?,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     onChange: ((CardForm) -> CardForm) -> Unit,
     onSave: () -> Unit,
     onDelete: (Card) -> Unit,
@@ -142,7 +145,7 @@ fun CardEditScreen(
                 ),
             ) {
                 Text(
-                    "← 카드",
+                    "← $backLabel",
                     style = DsType.backLink,
                     modifier = Modifier.clickable(onClick = onBack),
                 )
@@ -262,7 +265,17 @@ fun CardEditScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                PrimaryButton(if (isNew) "카드 저장" else "변경 저장", onSave)
+                // 저장을 눌러야 토스트로 알게 하지 않고, 빠진 항목을 버튼 위에 적어 둔다.
+                // 검사 기준은 MainViewModel.saveCard 와 같다(목표는 0보다 큰 숫자, 키워드는 쉼표로 나눈 뒤 하나 이상).
+                val missing = listOfNotNull(
+                    "별명".takeIf { form.nickname.isBlank() },
+                    "월 목표 금액".takeIf { (Money.parseAmount(form.target) ?: 0L) <= 0L },
+                    "인식 키워드".takeIf { form.keywords.split(',').none { it.isNotBlank() } },
+                )
+                if (missing.isNotEmpty()) {
+                    Footnote("저장하려면 채워 주세요: ${missing.joinToString(" · ")}")
+                }
+                PrimaryButton(if (isNew) "카드 저장" else "변경 저장", onSave, enabled = missing.isEmpty())
                 if (existingCard != null) {
                     DestructiveButton("카드 삭제", onClick = { onDelete(existingCard) })
                 }

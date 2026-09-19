@@ -99,6 +99,8 @@ fun SettingsScreen(
 
         // ---------------------------------------------------------- 수집 경로
 
+        item { SettingsGroupHeader("결제 모으기") }
+
         item {
             SettingRow(
                 title = "자동 집계",
@@ -148,10 +150,12 @@ fun SettingsScreen(
 
         // ---------------------------------------------------------- P1 · 내 데이터
 
+        item { SettingsGroupHeader("내 데이터") }
+
         item {
             SettingRow(
-                title = "백업 · 가져오기",
-                subtitle = "비밀번호로 암호화한 파일로 내보내고, 다른 기기에서 병합하거나 전체 교체합니다.",
+                title = "백업 · 복원",
+                subtitle = "비밀번호를 건 파일로 내보내고, 다른 기기에서 그 파일로 되살립니다.",
                 onClick = onOpenBackup,
                 trailing = { Text("→", style = DsType.listPrimary.copy(color = Ds.textSubtle)) },
             )
@@ -391,6 +395,8 @@ fun SourceAppsScreen(
     defaultSmsPackage: String?,
     onOpenNotificationAccess: () -> Unit,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     onToggle: (SourceApp, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -404,7 +410,7 @@ fun SourceAppsScreen(
                     bottom = 18.dp,
                 ),
             ) {
-                Text("← 설정", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
+                Text("← $backLabel", style = DsType.backLink, modifier = Modifier.clickable(onClick = onBack))
                 Spacer(Modifier.height(14.dp))
                 Text("알림 소스 · 수집 진단", style = DsType.h2)
                 Spacer(Modifier.height(10.dp))
@@ -516,4 +522,13 @@ private fun SourceDiagnosticRow(app: SourceApp, isDefaultSms: Boolean, onToggle:
         }
         Hairline()
     }
+}
+
+/** 설정 묶음 제목. 항목이 평면으로 늘어서 있으면 무엇이 어디 있는지 훑어보기 어렵다. */
+@Composable
+private fun SettingsGroupHeader(title: String) {
+    SectionLabel(
+        title,
+        Modifier.padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 22.dp, bottom = 4.dp),
+    )
 }

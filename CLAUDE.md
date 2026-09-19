@@ -36,7 +36,7 @@
 - 버전: `0.1.0` / versionCode 1 · minSdk 26 · compileSdk·targetSdk 37
 - APK: release 51.0MB (대부분 ML Kit 한국어 OCR 모델, BouncyCastle 은 R8 후 +0.1MB)
 - DB 스키마: **v5** (`AppDatabase.SCHEMA_VERSION`)
-- 테스트: **241개 전부 통과** (2026-09-13 기준), lint 오류 0
+- 테스트: **265개 전부 통과** (2026-09-19 기준), lint 오류 0
 - git: `main`, 원격 `boeing00/dulssencard` (**공개**) — §11 의 개인정보 이력 문제를 먼저 볼 것
 
 ---
@@ -89,7 +89,7 @@ cd /c/Users/moons/AndroidStudioProjects/dulssencard
 export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
 ADB="C:/Users/moons/AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
-./gradlew :app:testDebugUnitTest        # 241개, 기기 없이 돈다(Robolectric 포함)
+./gradlew :app:testDebugUnitTest        # 265개, 기기 없이 돈다(Robolectric 포함)
 ./gradlew :app:assembleDebug
 "$ADB" -s R3CX50262WD install -r app/build/outputs/apk/debug/app-debug.apk
 ```
@@ -410,3 +410,42 @@ PRD 와 이 문서가 어긋나면 **PRD 가 무엇을·이 문서가 어떻게*
 - 파라미터 상한(256MiB·10회·병렬4)·파일 64MB 상한을 **키 유도 전에** 검사. 한글 비밀번호 NFC 정규화.
 - BouncyCastle Argon2id 배선은 RFC 9106 공식 벡터로 테스트한다(`BackupCryptoTest`).
 - 충돌 정책은 `backup/ImportPlanner.kt` 머리 주석. 거래는 **지문**으로 같은 결제 판정, `updatedAt` 최신 우선·동률 로컬.
+
+---
+
+## 13. 2026-09-19 — 외부 교차검토(Codex · Gemini) 반영
+
+### 집계 (위임 금지 영역이라 판정·수정은 직접)
+
+- **원 거래를 찾은 취소는 원 거래를 따른다** (`Aggregator.counts`). 원 거래가 합계에 없으면(제외 · 확인 필요 ·
+  목표/한도 포함 꺼짐) 취소도 빠지고, 원 거래가 합계에 있으면 취소 자신의 설정이 꺼져 있어도 차감한다.
+  원 거래의 **시각은 보지 않는다**(§4 규칙 ③). 원 거래를 못 찾으면 자기 설정. → `CancelOriginAggregationTest`
+- 합계에 없는 거래(제외 · 확인 필요)를 지우면 거기 걸린 취소는 **제외**로 바꾼다. 연결만 끊으면 음수가 남는다.
+  자동 반영 거래는 여전히 제외를 거쳐야 지운다(`deleteUncountedTxns`).
+- 카드 편집 저장 시 기준 시각: 값 · 시작일이 그대로이고 기존 기준이 **지금 주기 안**일 때만 유지
+  (`Aggregator.initialAmountAtOnSave`). 새 주기에 지난달과 같은 금액을 넣으면 0 으로 읽히던 버그.
+- 사용자가 고른 원 거래의 카드로 취소를 옮긴다. 자동 연결은 같은 카드 승인을 먼저 고른다.
+
+### 화면 이동
+
+- **하단 탭은 탭 화면(홈 · 거래 · 카드 · 설정)에서만** 보인다. 하위 화면은 위의 `← ○○` 와 시스템 뒤로가기.
+- 뒤로가기는 `MainViewModel.history` 스택이 **들어온 길을 되짚는다**. 탭으로 가면 비운다. 하위 화면으로 갈 때는
+  `navigate()` 를 쓸 것 — `_state.copy(screen = …)` 로 직접 바꾸면 스택이 어긋난다.
+- 화면 이름은 `Screen.label` 한곳. 탭 이름 '결과함' → **'거래'**(확인 필요 · 모든 거래 · 제외를 다 담는다).
+- 같은 동작은 같은 이름: 집계 확정 · 실적 제외 · 복원 · 삭제. 사용자가 넣는 값은 '초기 사용액'(기준액 아님).
+
+### 협의에서 기각·보류한 것 (다시 꺼내기 전에 이유를 볼 것)
+
+| 제안 | 결론 |
+|---|---|
+| 분 단위 올림 때문에 같은 분 결제 이중 집계 | 기각 — §12 의 의도된 절충 |
+| 제외 전 확인 대화상자 | 기각 — 4.2초 되돌리기가 있고 결과함 처리 탭 수가 늘어난다 |
+| 백업 병합 시 백업에 없는 원 거래 id 가 로컬 거래와 우연히 연결 | 기각 — id 는 UUID. 같은 기기 백업이면 그 로컬 거래가 바로 그 원 거래다 |
+| 64MB 넘는 백업 생성 | 기각 — 현실적으로 도달하지 않는다 |
+| 결과함 일괄 선택 처리 | **보류(L)** — 효과는 크다. 하려면 선택한 것에만 적용 + 확인 |
+| 직접 입력 단순화 · 온보딩 카드 등록 간소화 | 보류(M) |
+
+Gemini CLI 는 파일을 많이 읽는 긴 질의에서 **출력 없이 멈춘다**(MCP 30분 · CLI 15분 모두). 그럴 땐
+`ask-free-ai.py --provider gemini --file` 로 소스를 붙여 묻는다. Codex 는 `codex exec` 가 전역 리뷰 스킬에
+가로채여 "어떤 리뷰를 실행할까요?"로 되물을 수 있다 — 프롬프트 첫 줄에 되묻지 말라고 적는다.
+

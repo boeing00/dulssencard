@@ -65,6 +65,8 @@ fun DetailScreen(
     cards: List<Card>,
     adjustments: List<Adjustment>,
     onBack: () -> Unit,
+    /** 뒤로가기가 실제로 갈 화면 이름. */
+    backLabel: String,
     onMoveToCard: (Card) -> Unit,
     onToggleTarget: () -> Unit,
     onToggleLimit: () -> Unit,
@@ -94,7 +96,7 @@ fun DetailScreen(
     LazyColumn(modifier.fillMaxWidth()) {
         item {
             Text(
-                "← 결과함",
+                "← $backLabel",
                 style = DsType.backLink,
                 modifier = Modifier
                     .padding(start = Ds.screenPadding, end = Ds.screenPadding, top = 18.dp)

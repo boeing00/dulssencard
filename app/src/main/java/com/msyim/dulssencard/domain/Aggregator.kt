@@ -29,6 +29,8 @@ object Aggregator {
          * 화면에서 "이 숫자가 어디서 왔는지"를 밝히는 데 쓴다 — 그래야 사용자가 다시 맞출 수 있다.
          */
         val initialApplied: Long,
+        /** [spent] 에 들어간 거래 건수(초기 사용액 제외). 홈에 "초기 사용액 + 알림 N건"으로 보인다. */
+        val countedCount: Int,
         val remaining: Long,
         val ratio: Float,
         val complete: Boolean,
@@ -155,24 +157,20 @@ object Aggregator {
         val window = Cycle.windowFor(card.cycleStartDay, now)
         val initial = initialAmountIn(card, window)
         val byId = txns.associateBy { it.id }
-        val spent = initial + txns.sumOf { txn ->
-            if (
-                txn.cardId == card.id &&
+        val counted = txns.filter { txn ->
+            txn.cardId == card.id &&
                 txn.status == TxStatus.AUTO &&
                 counts(txn, byId) { it.countsTowardTarget } &&
                 window.contains(effectiveTime(txn)) &&
                 isAfterInitialBaseline(txn, card)
-            ) {
-                txn.signedAmount
-            } else {
-                0L
-            }
         }
+        val spent = initial + counted.sumOf { it.signedAmount }
         val remaining = card.trackingTarget - spent
         return CardProgress(
             card = card,
             spent = spent,
             initialApplied = initial,
+            countedCount = counted.size,
             remaining = remaining,
             ratio = ratio(spent, card.trackingTarget),
             complete = remaining <= 0L && card.trackingTarget > 0L,

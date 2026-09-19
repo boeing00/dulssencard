@@ -8,6 +8,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -378,17 +380,22 @@ fun DsSnackbar(
             .padding(horizontal = 14.dp)
             .clip(RoundedCornerShape(Ds.radiusBanner))
             .background(Ds.ink)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp)
+            .heightIn(min = Ds.minTouchTarget),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(message, style = DsType.snackbar, modifier = Modifier.weight(1f))
         if (undoable) {
             Spacer(Modifier.width(12.dp))
-            Text(
-                "되돌리기",
-                style = DsType.undoAction,
-                modifier = Modifier.clickable(onClick = onUndo),
-            )
+            Box(
+                Modifier
+                    .heightIn(min = Ds.minTouchTarget)
+                    .clickable(role = Role.Button, onClick = onUndo)
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("되돌리기", style = DsType.undoAction)
+            }
         }
     }
 }
