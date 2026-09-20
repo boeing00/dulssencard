@@ -87,7 +87,15 @@ Play 스토어 앱 정보에서 권한 목록을 직접 확인해 보세요.
 
 ### 개인정보처리방침 URL
 
-`store/privacy-policy.md` 를 공개 URL 로 올린 뒤 그 주소를 넣는다. **호스팅 필요.**
+```
+https://boeing00.github.io/dulssencard/privacy.html
+```
+
+원문은 `store/privacy-policy.md` 한 벌뿐이다. 고친 뒤에는 반드시:
+
+```
+python store/make_privacy_html.py   # docs/privacy.html 갱신 → 커밋 → 푸시
+```
 
 ### 광고
 
@@ -182,8 +190,12 @@ Play 의 '수집'은 **기기 밖으로 전송하는 것**을 뜻한다. 이 앱
 
 ## 4. 아직 없는 것 (업로드 전에 만들어야 함)
 
-- [ ] 개인정보처리방침 **공개 URL** (문서는 `store/privacy-policy.md` 에 있음, 호스팅 필요)
-- [ ] 휴대전화 스크린샷 최소 2장 (권장 4~8장: 홈 · 카드 상세 · 거래 목록 · 설정)
+- [x] 개인정보처리방침 **공개 URL** — <https://boeing00.github.io/dulssencard/privacy.html>
+- [x] 휴대전화 스크린샷 — `store/screenshots/` 9장 (1080×2400, 에뮬레이터, 한국어)
+
+      올릴 순서 권장: `05_home` · `07_card_detail` · `06_inbox` · `01_onboarding_notice` ·
+      `09_backup` · `08_settings`. 01 은 권한 서사라 심사에도 도움이 된다.
+      나머지(02·03·04)는 온보딩 흐름이라 넣어도 되고 빼도 된다.
 - [ ] 그래픽 이미지 1024×500
 - [x] 앱 아이콘 512×512 — `store/ic_playstore_512.png`
 - [ ] 판매자(결제) 프로필 — 유료 상품 판매에 필요

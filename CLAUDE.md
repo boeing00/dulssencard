@@ -418,7 +418,15 @@ GitHub Support 에 "Remove cached views / dangling commits" 를 요청해야 한
 - **에뮬레이터 시계는 UTC**, 앱은 Asia/Seoul 로 해석한다. 테스트 문자에 기기 `date` 를 그대로 넣으면
   9시간 어긋나 "결제가 안 더해진다"는 가짜 버그를 본다. 한국 시각으로 만들어 보낼 것:
   `python -c "import datetime; print((datetime.datetime.now(datetime.UTC)+datetime.timedelta(hours=9)).strftime('%m/%d %H:%M'))"`
-- adb `input text` 로 한글은 안 들어간다. 카드 키워드는 뒷자리 숫자(`1234`)로 테스트한다.
+- adb `input text` 는 **한글을 직접 못 넣는다**(`NullPointerException: Attempt to get length of
+  null array`). 그런데 **두벌식 IME 를 거치면 들어간다** — 시스템 언어에 한국어를 넣으면 Gboard 에
+  한국어(두벌식) 서브타입이 붙고, 그 뒤로는 로마자 키를 보내면 IME 가 한글로 조합한다.
+  `input text "tlsgks"` → `신한`, `"rnrals"` → `국민`, `"elqemfla"` → `딥드림`. 띄어쓰기는 `%s`.
+  (2026-09-21 스토어 스크린샷 뽑으며 확인. 예전 메모의 "한글은 안 된다"는 절반만 맞았다.)
+- 시스템 언어를 한국어로 바꾸는 법: Play 이미지는 root 가 없어 `setprop persist.sys.locale` 이
+  막힌다. `am start -a android.settings.LOCALE_SETTINGS` → 언어 추가 → 검색 → 한국어 →
+  목록에서 English 의 점 세 개 → **Move down**. 드래그(`input draganddrop`·motionevent)는
+  스크롤로만 먹고 순서가 안 바뀐다.
 - 화면 확인은 `uiautomator dump` 로 글자·좌표를 읽고 누른다. 실기기 스크린샷은 찍지 않는다(키보드 제안줄에
   개인정보가 찍힌 적이 있다). 깨끗한 에뮬레이터는 괜찮다.
 
