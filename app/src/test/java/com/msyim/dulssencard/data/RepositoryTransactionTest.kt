@@ -373,6 +373,93 @@ class RepositoryTransactionTest {
         assertEquals(TxStatus.EXCLUDED, db.txnDao().byId("gone")!!.status)
     }
 
+    // ------------------------------------------------------- 되돌리기와 동시 수집
+
+    /**
+     * 되돌리기를 기다리는 4.2초 사이에 알림이 들어오면 새 결제가 저장된다. 되돌리기가 표를 비우고
+     * 스냅샷으로 덮으면 **그 결제가 사라진다.** 사용자는 방금 한 일만 취소하려던 것이다.
+     */
+    @Test
+    fun `되돌리기는 그 사이 수집된 거래를 지우지 않는다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "gone", amount = 20_000)
+        val gone = db.txnDao().byId("gone")!!
+        repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
+
+        val snapshot = repo.snapshot()
+        repo.deleteUncountedTxns(listOf("gone"))
+        // 되돌리기를 누르기 전에 알림이 들어왔다.
+        seedTxn(id = "incoming", amount = 7_700)
+
+        repo.restoreForUndo(snapshot)
+
+        assertNotNull("지운 거래가 안 살아났다", db.txnDao().byId("gone"))
+        assertNotNull("그 사이 들어온 결제가 사라졌다", db.txnDao().byId("incoming"))
+        assertEquals(7_700L, db.txnDao().byId("incoming")!!.amount)
+    }
+
+    @Test
+    fun `되돌리기는 그 동작이 만든 거래를 지운다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        val snapshot = repo.snapshot()
+        val added = repo.addManualTxn("c1", 30_000, TxDirection.APPROVAL, at(2026, 9, 7, 9, 0), "직접 입력")
+
+        repo.restoreForUndo(snapshot, listOf(added.id))
+
+        assertNull("직접 입력한 거래가 남았다", db.txnDao().byId(added.id))
+        assertTrue("변경 기록이 남았다", db.adjustmentDao().all().isEmpty())
+    }
+
+    /**
+     * 지운 직후 같은 알림이 다시 수집되면 **다른 id 가 같은 지문을 차지한다.** 그대로 되살리면
+     * 지문 유니크 인덱스에 걸려 되돌리기 자체가 터진다.
+     */
+    @Test
+    fun `지운 결제가 다시 수집돼도 되돌리기가 터지지 않는다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        seedTxn(id = "gone", amount = 20_000)
+        val gone = db.txnDao().byId("gone")!!
+        repo.applyChange(gone, gone.copy(status = TxStatus.EXCLUDED), ChangeType.EXCLUDE)
+
+        val snapshot = repo.snapshot()
+        repo.deleteUncountedTxns(listOf("gone"))
+        // 같은 알림이 다시 왔다 — 지문은 같고 id 만 새것이다.
+        db.txnDao().insertIgnoringDuplicates(gone.copy(id = "again", status = TxStatus.AUTO))
+
+        repo.restoreForUndo(snapshot)
+
+        val restored = db.txnDao().all().filter { it.messageFingerprint == gone.messageFingerprint }
+        assertEquals("같은 지문이 둘 남았다", 1, restored.size)
+        assertEquals("gone", restored.single().id)
+        assertEquals(TxStatus.EXCLUDED, restored.single().status)
+    }
+
+    /**
+     * `IN (:ids)` 는 바인딩 변수 개수에 상한이 있다. 목록에서 한 번에 지우는 건수에는 상한이 없으므로
+     * 나눠서 보내야 한다. 나누지 않으면 `too many SQL variables` 로 앱이 죽는다.
+     */
+    @Test
+    fun `묶음 한계를 넘는 건수도 한 번에 지워진다`() = runBlocking {
+        repo.upsertCard(shinhan)
+        val ids = (1..1_000).map { "bulk-$it" }
+        ids.forEach { id ->
+            db.txnDao().insertIgnoringDuplicates(
+                Txn(
+                    id = id, cardId = "c1", occurredAt = at(2026, 9, 5, 12, 0),
+                    receivedAt = at(2026, 9, 5, 12, 0), amount = 1_000, currency = "KRW",
+                    direction = TxDirection.APPROVAL, status = TxStatus.EXCLUDED, source = TxSource.SMS,
+                    merchant = "가게", countsTowardTarget = true, countsTowardPurchaseLimit = true,
+                    parserVersion = "t", confidence = 1.0, messageFingerprint = "fp-$id",
+                    relatedTransactionId = null, pendingReason = PendingReason.USER_EXCLUDED,
+                    issuerKey = "SHINHAN", installment = false, overseas = false,
+                ),
+            )
+        }
+
+        assertEquals(1_000, repo.deleteUncountedTxns(ids))
+        assertTrue(db.txnDao().all().isEmpty())
+    }
+
     // ------------------------------------------------------- 되돌리기의 완전성
 
     @Test

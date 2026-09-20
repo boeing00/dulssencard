@@ -67,6 +67,14 @@ class DulSsenRepository @VisibleForTesting internal constructor(
 
     private suspend fun <R> atomically(block: suspend () -> R): R = db.withTransaction { block() }
 
+    /**
+     * `IN (:ids)` 에 한 번에 묶을 목록을 나눈다. 바인딩 변수 개수에는 상한이 있고
+     * (SQLCipher 4.18 이 싣는 SQLite 기준 99,999, 같은 질의의 다른 인자도 함께 센다),
+     * 넘으면 `too many SQL variables` 로 죽는다. 사용자가 목록에서 한 번에 지우는 건수에는
+     * 상한이 없으므로 여유를 크게 두고 나눈다.
+     */
+    private fun <T> Collection<T>.forSql(): List<List<T>> = toList().chunked(SQL_VARIABLE_CHUNK)
+
     // ---------------------------------------------------------------- 수집
 
     /** 한 건을 반영한 결과. 화면 문구와 알림 소스 진단이 이 값을 그대로 쓴다. */
@@ -380,13 +388,13 @@ class DulSsenRepository @VisibleForTesting internal constructor(
      */
     suspend fun deleteUncountedTxns(ids: List<String>, now: Long = System.currentTimeMillis()): Int = atomically {
         if (ids.isEmpty()) return@atomically 0
-        val deletable = db.txnDao().uncountedIds(ids)
+        val deletable = ids.forSql().flatMap { db.txnDao().uncountedIds(it) }
         if (deletable.isEmpty()) return@atomically 0
-        db.txnDao().excludeCancelsOf(deletable, now)
-        db.txnDao().unlinkFrom(deletable)
-        db.adjustmentDao().deleteForTxns(deletable)
+        deletable.forSql().forEach { db.txnDao().excludeCancelsOf(it, now) }
+        deletable.forSql().forEach { db.txnDao().unlinkFrom(it) }
+        deletable.forSql().forEach { db.adjustmentDao().deleteForTxns(it) }
         checkpoint("deleteExcluded:beforeDelete")
-        db.txnDao().deleteUncounted(deletable)
+        deletable.forSql().sumOf { db.txnDao().deleteUncounted(it) }
     }
 
     /** 금액 정정. 알림에서 잘못 읽었거나 부분 취소가 반영 안 된 경우. */
@@ -489,6 +497,40 @@ class DulSsenRepository @VisibleForTesting internal constructor(
         db.settingDao().clear()
         db.cycleSnapshotDao().clear()
         checkpoint("restore:afterClear")
+        snapshot.cards.forEach { db.cardDao().upsert(it) }
+        snapshot.txns.forEach { db.txnDao().upsert(it) }
+        snapshot.adjustments.forEach { db.adjustmentDao().upsert(it) }
+        snapshot.settings.forEach { db.settingDao().put(it) }
+        snapshot.cycleSnapshots.forEach { db.cycleSnapshotDao().upsert(it) }
+    }
+
+    /**
+     * 스낵바 '되돌리기' 전용 복원. [restore] 와 달리 **거래 표를 비우지 않는다.**
+     *
+     * 되돌리기를 기다리는 4.2초 사이에 알림이 들어와 새 결제가 저장될 수 있다. 표를 비우고 스냅샷으로
+     * 덮으면 사용자가 방금 한 일을 취소하려다 **그 결제를 잃는다** — 수집이 백그라운드에서 계속 도는
+     * 앱이라 드문 일이 아니다.
+     *
+     * 되살리는 것은 스냅샷에 있던 거래뿐이고, 지우는 것은 [createdTxnIds](되돌릴 동작이 직접 만든
+     * 거래)뿐이다. 스냅샷에도 없고 동작이 만든 것도 아닌 거래 = 그 사이 수집된 것이므로 그대로 둔다.
+     *
+     * 나머지 표는 통째로 바꿔도 안전하다. 수집 경로가 쓰는 표는 `txns` 와 알림 소스 통계뿐이고,
+     * 알림 소스는 [restore] 와 마찬가지로 건드리지 않는다.
+     */
+    suspend fun restoreForUndo(
+        snapshot: Snapshot,
+        createdTxnIds: Collection<String> = emptyList(),
+    ) = atomically {
+        db.cardDao().clear()
+        db.adjustmentDao().clear()
+        db.settingDao().clear()
+        db.cycleSnapshotDao().clear()
+        createdTxnIds.forSql().forEach { db.txnDao().deleteByIds(it) }
+        // 되살릴 지문을 다른 id 가 차지하고 있으면 유니크 인덱스에 걸린다. 먼저 비켜 준다.
+        snapshot.txns.forSql().forEach { chunk ->
+            db.txnDao().deleteByFingerprints(chunk.map { it.messageFingerprint })
+        }
+        checkpoint("restoreForUndo:afterClear")
         snapshot.cards.forEach { db.cardDao().upsert(it) }
         snapshot.txns.forEach { db.txnDao().upsert(it) }
         snapshot.adjustments.forEach { db.adjustmentDao().upsert(it) }
@@ -675,6 +717,9 @@ class DulSsenRepository @VisibleForTesting internal constructor(
     }
 
     companion object {
+        /** `IN (:ids)` 한 번에 묶는 최대 개수. [forSql] 참고. */
+        private const val SQL_VARIABLE_CHUNK = 900
+
         /** 알림 소스 인식/실패 수를 세는 기간. 넘으면 0부터 다시 센다. */
         const val SOURCE_STATS_WINDOW_MILLIS = 7L * 24 * 60 * 60 * 1000
 

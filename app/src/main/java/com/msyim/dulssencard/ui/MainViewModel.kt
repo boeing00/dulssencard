@@ -197,6 +197,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var undoSnapshot: DulSsenRepository.Snapshot? = null
+
+    /**
+     * 되돌릴 동작이 **직접 만든** 거래. 되돌리기는 이것만 지운다 — 그 사이 알림으로 들어온 거래는
+     * 남겨야 한다. [armUndo] 참고.
+     */
+    private var undoCreatedTxnIds: List<String> = emptyList()
     private var toastJob: Job? = null
 
     private val proUnlock = com.msyim.dulssencard.billing.ProUnlock(app)
@@ -501,7 +507,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteCard(card: Card) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.deleteCard(card)
             // 지운 카드의 상세로 돌아가지 않도록 기록을 비우고 카드 목록으로 간다.
             go(Screen.CARDS)
@@ -568,7 +574,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         transform: (Txn) -> Txn,
     ) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             val after = transform(txn)
             repository.applyChange(txn, after, changeType)
             say(message, undoable = true)
@@ -584,7 +590,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun commitLimit() {
         val amount = Money.parseAmount(_state.value.limitInput) ?: return
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.putSetting(Settings.LIMIT_AMOUNT, amount.toString())
             say("한도를 ${Money.won(amount)}(으)로 바꿨습니다", undoable = true)
         }
@@ -625,7 +631,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun wipeAll() {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.wipeAll()
             // 복원 전 자동 백업도 데이터 사본이다. 남겨 두면 "전체 삭제" 뒤에도 기기에 거래가 남는다.
             // 파일과 그걸 여는 Keystore 키를 함께 버린다. (방금 삭제는 4.2초 되돌리기가 메모리 스냅샷으로 가능하다.)
@@ -649,7 +655,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun setInitialAmount(card: Card, amount: Long) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.setInitialAmount(card.id, amount)
             say(
                 if (amount == 0L) "${card.nickname} 초기 사용액을 껐습니다" else "${card.nickname} 기준액을 ${Money.won(amount)}으로 맞췄습니다",
@@ -707,8 +713,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         val signed = if (form.kind == ManualKind.ADJUST && form.negative) -amount else amount
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
-            repository.addManualTxn(form.cardId, signed, direction, occurredAt, form.merchant)
+            armUndo()
+            undoCreatedTxnIds = listOf(
+                repository.addManualTxn(form.cardId, signed, direction, occurredAt, form.merchant).id,
+            )
             back()
             say("${form.kind.label}: ${Money.won(signed)}", undoable = true)
         }
@@ -717,7 +725,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 합계에 없는 거래(제외 · 확인 필요) 영구 삭제. 직후 4.2초 동안 되돌릴 수 있다. 상세 화면에서 지웠으면 목록으로 돌아간다. */
     fun deleteUncounted(txns: List<Txn>) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             val deleted = repository.deleteUncountedTxns(txns.map { it.id })
             if (_state.value.screen == Screen.DETAIL && txns.any { it.id == _state.value.selectedTxnId }) {
                 back()
@@ -731,7 +739,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun correctAmount(txn: Txn, amount: Long) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.correctAmount(txn, amount)
             say("금액을 ${Money.won(amount)}으로 정정했습니다", undoable = true)
         }
@@ -751,7 +759,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun linkCancel(cancel: Txn, origin: Txn) {
         viewModelScope.launch {
-            undoSnapshot = repository.snapshot()
+            armUndo()
             repository.linkCancel(cancel, origin)
             _state.value = _state.value.copy(cancelCandidates = null)
             say("원 승인 거래에 연결했습니다", undoable = true)
@@ -1038,22 +1046,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- 스낵바 · 되돌리기
 
+    /**
+     * 되돌리기 준비. 동작 **직전에** 부른다. 동작이 거래를 새로 만들면 만든 뒤에
+     * [undoCreatedTxnIds] 를 채운다(직접 입력).
+     */
+    private suspend fun armUndo() {
+        undoSnapshot = repository.snapshot()
+        undoCreatedTxnIds = emptyList()
+    }
+
+    private fun forgetUndo() {
+        undoSnapshot = null
+        undoCreatedTxnIds = emptyList()
+    }
+
     private fun say(message: String, undoable: Boolean) {
         toastJob?.cancel()
-        if (!undoable) undoSnapshot = null
+        if (!undoable) forgetUndo()
         _state.value = _state.value.copy(toast = Toast(message, undoable))
         toastJob = viewModelScope.launch {
             delay(TOAST_DURATION_MS)
-            undoSnapshot = null
+            forgetUndo()
             _state.value = _state.value.copy(toast = null)
         }
     }
 
     fun undo() {
         val snapshot = undoSnapshot ?: return
+        val created = undoCreatedTxnIds
         viewModelScope.launch {
-            repository.restore(snapshot)
-            undoSnapshot = null
+            repository.restoreForUndo(snapshot, created)
+            forgetUndo()
             say("되돌렸습니다", undoable = false)
         }
     }

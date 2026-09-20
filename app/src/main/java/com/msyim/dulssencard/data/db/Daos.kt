@@ -128,6 +128,21 @@ interface TxnDao {
     @Query("SELECT id FROM txns WHERE id IN (:ids) AND status IN ('EXCLUDED', 'PENDING')")
     suspend fun uncountedIds(ids: List<String>): List<String>
 
+    /**
+     * 상태를 가리지 않고 지운다. **되돌리기 전용** — 되돌릴 동작이 직접 만든 거래를 거두는 데만 쓴다.
+     * 사용자가 누르는 삭제는 [deleteUncounted] 를 쓴다(합계에 들어간 거래를 지키려고).
+     */
+    @Query("DELETE FROM txns WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<String>)
+
+    /**
+     * 지문으로 지운다. 되돌리기가 스냅샷의 거래를 되살리기 직전에 부른다 — 지운 직후 같은 알림이
+     * 다시 수집되면 **다른 id 가 같은 지문을 차지**하고, 그대로 되살리면 지문 유니크 인덱스에 걸려
+     * 되돌리기 자체가 실패한다.
+     */
+    @Query("DELETE FROM txns WHERE messageFingerprint IN (:fingerprints)")
+    suspend fun deleteByFingerprints(fingerprints: List<String>)
+
     @Query("UPDATE txns SET cardId = NULL, status = 'PENDING', pendingReason = 'NO_CARD_MATCH' WHERE cardId = :cardId")
     suspend fun detachFromCard(cardId: String)
 
