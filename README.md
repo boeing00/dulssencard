@@ -339,7 +339,7 @@ adb emu sms send 15771000 "[Web발신] 신한카드(1234)승인 홍*동 12,500�
 - [x] 데이터 안전성 답안 — `store/play-listing.md` §2. **'수집 안 함'** 이고 근거는
       INTERNET 권한 미선언이다. 라이브러리가 있다고 답을 바꾸지 말 것.
 - [x] 스토어 스크린샷 9장 — `store/screenshots/` (에뮬레이터, 한국어)
-- [ ] 그래픽 이미지 1024×500
+- [x] 그래픽 이미지 1024×500 — `store/make_feature_graphic.py` 로 생성
 - [ ] 판매자(결제) 프로필 · 인앱 상품 `pro_unlock`
 
 ---

@@ -196,7 +196,8 @@ Play 의 '수집'은 **기기 밖으로 전송하는 것**을 뜻한다. 이 앱
       올릴 순서 권장: `05_home` · `07_card_detail` · `06_inbox` · `01_onboarding_notice` ·
       `09_backup` · `08_settings`. 01 은 권한 서사라 심사에도 도움이 된다.
       나머지(02·03·04)는 온보딩 흐름이라 넣어도 되고 빼도 된다.
-- [ ] 그래픽 이미지 1024×500
+- [x] 그래픽 이미지 1024×500 — `store/feature_graphic_1024x500.png`
+      (`python store/make_feature_graphic.py`, 앱과 같은 색 토큰·IBM Plex Sans KR)
 - [x] 앱 아이콘 512×512 — `store/ic_playstore_512.png`
 - [ ] 판매자(결제) 프로필 — 유료 상품 판매에 필요
 - [ ] 인앱 상품 `pro_unlock` (일회성 2,900원) — BILLING 빌드가 한 번 올라간 뒤에 만들 수 있다
